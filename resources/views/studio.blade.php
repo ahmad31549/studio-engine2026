@@ -588,7 +588,7 @@
                 formData.append('file_name', file.name);
                 formData.append('chunk_index', i);
                 formData.append('total_chunks', totalChunks);
-                formData.append('chunk', chunk);
+                formData.append('chunk', chunk, 'chunk.blob');
 
                 const response = await new Promise((resolve, reject) => {
                     const xhr = new XMLHttpRequest();
@@ -623,11 +623,18 @@
                     };
 
                     xhr.onload = () => resolve(new Response(xhr.responseText, { status: xhr.status }));
-                    xhr.onerror = () => reject(new Error('Chunk upload failed'));
+                    xhr.onerror = () => reject(new Error('Network error during chunk upload'));
                     xhr.send(formData);
                 });
 
-                if (!response.ok) throw new Error('Failed to upload chunk');
+                if (!response.ok) {
+                    let msg = 'Failed to upload chunk';
+                    try {
+                        const err = await response.json();
+                        if (err.error) msg = err.error;
+                    } catch(e) {}
+                    throw new Error(`${msg} (${response.status})`);
+                }
                 uploadedBytes += (end - start);
             }
         }
