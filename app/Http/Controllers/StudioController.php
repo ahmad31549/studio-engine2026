@@ -17,13 +17,55 @@ use ZipArchive;
 class StudioController extends Controller
 {
     private $storagePath;
+    private $limitMB = 20480; // 20GB Working Limit
 
     public function __construct()
     {
-        $this->storagePath = storage_path('app/studio');
+        $this->storagePath = storage_path('app/tasks');
         if (!file_exists($this->storagePath)) {
             mkdir($this->storagePath, 0755, true);
         }
+    }
+
+    private function getUsedStorageBytes()
+    {
+        $totalSize = 0;
+        if (!file_exists($this->storagePath)) return 0;
+        
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($this->storagePath));
+        foreach ($files as $file) {
+            if ($file->isFile()) {
+                $totalSize += $file->getSize();
+            }
+        }
+        return $totalSize;
+    }
+
+    private function checkStorageLimit()
+    {
+        $used = $this->getUsedStorageBytes();
+        $limit = $this->limitMB * 1024 * 1024;
+        return $used < $limit;
+    }
+
+    public function getStorageStats()
+    {
+        $usedBytes = $this->getUsedStorageBytes();
+        $limitBytes = $this->limitMB * 1024 * 1024;
+        $remainingBytes = max(0, $limitBytes - $usedBytes);
+        $percent = ($usedBytes / $limitBytes) * 100;
+        
+        $status = 'normal';
+        if ($percent >= 100) $status = 'full';
+        elseif ($percent >= 80) $status = 'warning';
+
+        return response()->json([
+            'total_mb' => $this->limitMB,
+            'used_bytes' => $usedBytes,
+            'remaining_bytes' => $remainingBytes,
+            'percent' => round($percent, 2),
+            'status' => $status
+        ]);
     }
 
     /**
@@ -31,8 +73,12 @@ class StudioController extends Controller
      */
     public function upload(Request $request)
     {
+        if (!$this->checkStorageLimit()) {
+            return response()->json(['error' => 'Storage is full. Please click Clear Memory before starting a new task.'], 403);
+        }
+
         $jobId = (string) Str::uuid();
-        $jobDir = $this->storagePath . '/' . $jobId . '/uploads';
+        $jobDir = $this->storagePath . '/' . $jobId . '/input';
         if (!file_exists($jobDir)) mkdir($jobDir, 0755, true);
 
         $files = $request->file('files');
@@ -74,6 +120,10 @@ class StudioController extends Controller
 
     public function uploadChunk(Request $request)
     {
+        if (!$this->checkStorageLimit()) {
+            return response()->json(['error' => 'Storage is full. Please click Clear Memory before starting a new task.'], 403);
+        }
+
         $jobId = $request->input('job_id');
         $fileName = $request->input('file_name');
         $chunkIndex = (int) $request->input('chunk_index');
@@ -84,7 +134,7 @@ class StudioController extends Controller
             return response()->json(['error' => 'Missing data'], 400);
         }
 
-        $jobDir = $this->storagePath . '/' . $jobId . '/uploads';
+        $jobDir = $this->storagePath . '/' . $jobId . '/input';
         if (!file_exists($jobDir)) mkdir($jobDir, 0755, true);
 
         $tempPath = $jobDir . '/' . $fileName . '.part';
@@ -109,7 +159,7 @@ class StudioController extends Controller
         $jobId = $request->input('job_id');
         if (!$jobId) return response()->json(['error' => 'Job ID required'], 400);
 
-        $jobDir = $this->storagePath . '/' . $jobId . '/uploads';
+        $jobDir = $this->storagePath . '/' . $jobId . '/input';
         if (!file_exists($jobDir)) return response()->json(['error' => 'Upload dir not found'], 404);
 
         $files = File::files($jobDir);
@@ -134,6 +184,18 @@ class StudioController extends Controller
         ]);
 
         $this->purgeOldJobs();
+
+        // Log task in DB
+        try {
+            \App\Models\Task::create([
+                'id' => $jobId,
+                'user_id' => Auth::id(),
+                'file_name' => count($savedFiles) === 1 ? $savedFiles[0]['name'] : 'Batch Upload (' . count($savedFiles) . ' files)',
+                'stored_path' => $jobDir,
+                'file_size' => collect($savedFiles)->sum('size'),
+                'status' => 'uploaded'
+            ]);
+        } catch (\Exception $e) {}
 
         return response()->json(['status' => 'uploaded', 'job_id' => $jobId]);
     }
@@ -161,11 +223,15 @@ class StudioController extends Controller
      */
     public function uploadUrl(Request $request)
     {
+        if (!$this->checkStorageLimit()) {
+            return response()->json(['error' => 'Storage is full. Please click Clear Memory before starting a new task.'], 403);
+        }
+
         $url = $request->input('url');
         if (!$url) return response()->json(['error' => 'URL is required'], 400);
 
         $jobId = (string) Str::uuid();
-        $jobDir = $this->storagePath . '/' . $jobId . '/uploads';
+        $jobDir = $this->storagePath . '/' . $jobId . '/input';
         if (!file_exists($jobDir)) mkdir($jobDir, 0755, true);
 
         try {
@@ -289,7 +355,7 @@ class StudioController extends Controller
         $job = $this->getJob($jobId);
         if (!$job) return response()->json(['error' => 'Job not found'], 404);
 
-        $extractRoot = $this->storagePath . '/' . $jobId . '/original';
+        $extractRoot = $this->storagePath . '/' . $jobId . '/work';
         if (file_exists($extractRoot)) {
             File::deleteDirectory($extractRoot);
         }
@@ -565,7 +631,7 @@ class StudioController extends Controller
             $this->updateJob($jobId, ['progress_message' => "Processing " . ($index+1) . "/$total..."]);
             
             $sourceStem = pathinfo($source['name'], PATHINFO_FILENAME);
-            $sourceExtractPath = $this->storagePath . '/' . $jobId . '/original/' . $sourceStem;
+            $sourceExtractPath = $this->storagePath . '/' . $jobId . '/work/' . $sourceStem;
             
             // Critical Check: Ensure source exists before processing
             if (!File::exists($sourceExtractPath)) {
@@ -605,11 +671,11 @@ class StudioController extends Controller
 
         // Final Cleanup Level 1: Delete original uploads and large extracts
         // We only keep the '/output' folder which has the rebranded zips
-        if (File::exists($this->storagePath . '/' . $jobId . '/original')) {
-            File::deleteDirectory($this->storagePath . '/' . $jobId . '/original');
+        if (File::exists($this->storagePath . '/' . $jobId . '/work')) {
+            File::deleteDirectory($this->storagePath . '/' . $jobId . '/work');
         }
-        if (File::exists($this->storagePath . '/' . $jobId . '/uploads')) {
-            File::deleteDirectory($this->storagePath . '/' . $jobId . '/uploads');
+        if (File::exists($this->storagePath . '/' . $jobId . '/input')) {
+            File::deleteDirectory($this->storagePath . '/' . $jobId . '/input');
         }
 
         $this->updateJob($jobId, [
@@ -719,8 +785,17 @@ class StudioController extends Controller
                 File::deleteDirectory($folder);
             }
         }
-        // No need to truncate anymore as they are all files
-        // StudioJob::truncate();
+        
+        // Log cleanup
+        try {
+            \App\Models\StorageLog::create([
+                'user_id' => Auth::id(),
+                'event_type' => 'cleanup',
+                'message' => 'User cleared working storage memory.',
+                'size_delta' => 0 // Would need to measure before and after for true delta
+            ]);
+        } catch (\Exception $e) {}
+
         return response()->json(['status' => 'success', 'message' => 'All temporary storage cleared.']);
     }
 

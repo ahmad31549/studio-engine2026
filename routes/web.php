@@ -63,6 +63,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/maintenance/cleanup-storage', [\App\Http\Controllers\StudioController::class, 'maintenanceCleanup']);
         Route::get('/jobs/{jobId}/assets/preview', [\App\Http\Controllers\StudioController::class, 'previewAsset']);
         Route::get('/jobs/{jobId}/assets/{path}', [\App\Http\Controllers\StudioController::class, 'downloadAsset'])->where('path', '.*');
+        Route::get('/storage/stats', [\App\Http\Controllers\StudioController::class, 'getStorageStats']);
     });
 });
 

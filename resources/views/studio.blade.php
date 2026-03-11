@@ -100,6 +100,72 @@
 }
 .step.active .step-label { color: #f97316; }
 .step.completed .step-label { color: #10b981; }
+
+/* Storage Card Styles */
+.storage-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 16px 24px;
+    margin-bottom: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    backdrop-filter: blur(10px);
+}
+.storage-info {
+    flex: 1;
+}
+.storage-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+}
+.storage-title {
+    font-size: 0.75rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+}
+.storage-usage-text {
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+.storage-bar-container {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.storage-bar-fill {
+    height: 100%;
+    width: 0%;
+    transition: width 0.5s ease, background 0.3s ease;
+}
+.storage-status-normal { background: #10b981; }
+.storage-status-warning { background: #f59e0b; }
+.storage-status-full { background: #ef4444; }
+
+.btn-clear-mem {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    padding: 10px 16px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+.btn-clear-mem:hover {
+    background: #ef4444;
+    color: #fff;
+    transform: translateY(-2px);
+}
 </style>
 <div class="stepper fade-in" style="max-width: 1000px;">
     <div class="step" id="step1">
@@ -125,6 +191,24 @@
     <div class="step" id="step6">
         <div class="step-circle">6</div>
         <div class="step-label">Download</div>
+    </div>
+</div>
+
+<div class="storage-card fade-in" style="max-width: 1000px; margin: 0 auto 32px;" id="storageControlCard">
+    <div class="storage-info">
+        <div class="storage-header">
+            <span class="storage-title">Engine Storage Usage</span>
+            <span class="storage-usage-text" id="storageUsageLabel">0 GB / 20 GB</span>
+        </div>
+        <div class="storage-bar-container">
+            <div id="storageBarFill" class="storage-bar-fill storage-status-normal"></div>
+        </div>
+    </div>
+    <div style="text-align: right;">
+        <button type="button" class="btn-clear-mem" id="clearMemoryBtn">
+            <span style="font-size: 1.1rem; vertical-align: middle; margin-right: 4px;">🧹</span> 
+            CLEAR MEMORY
+        </button>
     </div>
 </div>
 
@@ -1386,6 +1470,77 @@
             }, 3000);
         }
     };
+
+    // --- Storage Management Logic ---
+    const storageUsageLabel = document.getElementById('storageUsageLabel');
+    const storageBarFill = document.getElementById('storageBarFill');
+    const clearMemoryBtn = document.getElementById('clearMemoryBtn');
+
+    async function refreshStorageStats() {
+        try {
+            const resp = await apiFetch('/storage/stats');
+            if (resp.ok) {
+                const data = await resp.json();
+                const usedGB = (data.used_bytes / (1024 * 1024 * 1024)).toFixed(2);
+                const totalGB = (data.total_mb / 1024).toFixed(0);
+                
+                if (storageUsageLabel) storageUsageLabel.innerText = `${usedGB} GB / ${totalGB} GB (${data.percent}%)`;
+                if (storageBarFill) {
+                    storageBarFill.style.width = data.percent + "%";
+                    
+                    // Remove old status classes
+                    storageBarFill.classList.remove('storage-status-normal', 'storage-status-warning', 'storage-status-full');
+                    
+                    // Add new status class
+                    if (data.status === 'full') storageBarFill.classList.add('storage-status-full');
+                    else if (data.status === 'warning') storageBarFill.classList.add('storage-status-warning');
+                    else storageBarFill.classList.add('storage-status-normal');
+                }
+
+                // If storage is full, disable upload buttons
+                if (data.status === 'full') {
+                    if (elements.launchBtn) elements.launchBtn.disabled = true;
+                    if (linkUploadBtn) linkUploadBtn.disabled = true;
+                }
+            }
+        } catch (e) {
+            console.error("Storage polling failed", e);
+        }
+    }
+
+    if (clearMemoryBtn) {
+        clearMemoryBtn.onclick = async () => {
+            if (!confirm("Are you sure you want to clear all working memory? This will delete all uploaded and processed files.")) return;
+            
+            const originalText = clearMemoryBtn.innerHTML;
+            clearMemoryBtn.disabled = true;
+            clearMemoryBtn.innerHTML = "🧹 CLEARING...";
+            
+            try {
+                const resp = await apiFetch(`/maintenance/cleanup-storage`, { method: 'POST' });
+                if (resp.ok) {
+                    refreshStorageStats();
+                    // Reset UI to idle if currently processing
+                    if (['uploading', 'scanning', 'processing'].includes(state.status)) {
+                        state.status = 'idle';
+                        updateView();
+                    }
+                    alert("Memory cleared successfully.");
+                } else {
+                    alert("Failed to clear memory.");
+                }
+            } catch (e) {
+                alert("Error during memory cleanup.");
+            } finally {
+                clearMemoryBtn.disabled = false;
+                clearMemoryBtn.innerHTML = originalText;
+            }
+        };
+    }
+
+    // Start Polling every 10 seconds
+    setInterval(refreshStorageStats, 10000);
+    refreshStorageStats(); // Initial check
 
     updateView();
 </script>
