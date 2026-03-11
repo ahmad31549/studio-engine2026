@@ -842,7 +842,7 @@ class StudioController extends Controller
 
     private function resolveJobAssetPath(string $jobId, string $path): ?string
     {
-        $jobRoot = realpath($this->storagePath . DIRECTORY_SEPARATOR . $jobId . DIRECTORY_SEPARATOR . 'original');
+        $jobRoot = realpath($this->storagePath . DIRECTORY_SEPARATOR . $jobId . DIRECTORY_SEPARATOR . 'work');
         if ($jobRoot === false) {
             return null;
         }
