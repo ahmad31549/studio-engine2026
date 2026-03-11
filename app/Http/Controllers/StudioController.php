@@ -45,6 +45,7 @@ class StudioController extends Controller
     {
         $used = $this->getUsedStorageBytes();
         $limit = $this->limitMB * 1024 * 1024;
+        Log::info("Storage Check: Used " . round($used / 1024 / 1024, 2) . "MB / Limit " . $this->limitMB . "MB");
         return $used < $limit;
     }
 
@@ -120,6 +121,7 @@ class StudioController extends Controller
 
     public function uploadChunk(Request $request)
     {
+        Log::info("UploadChunk Start: " . $request->input('file_name') . " (Chunk " . $request->input('chunk_index') . ")");
         if (!$this->checkStorageLimit()) {
             return response()->json(['error' => 'Storage is full. Please click Clear Memory before starting a new task.'], 403);
         }
