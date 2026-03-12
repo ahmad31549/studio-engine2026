@@ -24,5 +24,9 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('admin', function (User $user) {
             return (bool) $user->is_admin;
         });
+
+        Gate::define('access-procreate-studio', function (User $user) {
+            return $user->hasToolAccess('procreate_studio');
+        });
     }
 }

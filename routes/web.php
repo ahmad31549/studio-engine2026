@@ -27,6 +27,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('/studio/pdf/delete/{id}', [\App\Http\Controllers\PdfGeneratorController::class, 'destroy'])->name('pdf.delete');
     Route::get('/studio/pdf/preview/{id}', [\App\Http\Controllers\PdfGeneratorController::class, 'preview'])->name('pdf.preview');
 
+    Route::get('/studio/procreate', function () {
+        return view('studio');
+    })->middleware(['can:access-procreate-studio'])->name('studio.procreate');
+
     // Admin Routes
     Route::middleware(['can:admin'])->group(function () {
         Route::get('/admin', [\App\Http\Controllers\AdminController::class, 'index'])->name('admin.index');
@@ -34,15 +38,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/admin/users/{id}/tool-access', [\App\Http\Controllers\AdminController::class, 'updateToolAccess'])->name('admin.users.tools');
         Route::post('/admin/users/{id}/reset-password', [\App\Http\Controllers\AdminController::class, 'resetPassword'])->name('admin.users.password');
         Route::delete('/admin/users/{id}', [\App\Http\Controllers\AdminController::class, 'deleteUser'])->name('admin.users.delete');
-
-        Route::get('/studio/procreate', function () {
-            return view('studio');
-        })->name('studio.procreate');
     });
 });
 
 // Studio Engine Routes (Auth only, skip 'verified' to ensure AJAX works for everyone)
-Route::middleware(['auth'])->group(function () {
+Route::middleware(['auth', 'can:access-procreate-studio'])->group(function () {
     Route::prefix('studio-engine')->group(function () {
         Route::post('/upload', [\App\Http\Controllers\StudioController::class, 'upload']);
         Route::post('/upload-chunk', [\App\Http\Controllers\StudioController::class, 'uploadChunk']);
