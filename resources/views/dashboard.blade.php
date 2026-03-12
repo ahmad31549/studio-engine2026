@@ -64,7 +64,7 @@
     @if(isset($records) && $records->count() > 0)
     <div style="margin-top: 60px;">
         <div class="section-label" style="margin-bottom: 24px;">
-            <div class="step-number" style="background: var(--secondary)">📄</div>
+            <div class="step-number" style="background: var(--secondary)"><i class="fa-solid fa-file-lines"></i></div>
             <h2 class="section-title">Saved PDF Lab Documents</h2>
         </div>
         <div class="glass-panel" style="background: var(--card); border: 1px solid var(--border-color); border-radius: 16px; overflow: hidden;">

@@ -9,6 +9,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Orbitron:wght@700;900&display=swap"
         rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
@@ -277,13 +278,13 @@
         .pdf-hero {
             background: #000;
             color: #fff;
-            border-radius: 20px;
-            padding: 32px 36px;
+            border-radius: 24px;
+            padding: 30px 32px;
             margin-bottom: 28px;
             position: relative;
             overflow: hidden;
             border: 1px solid rgba(212, 160, 0, 0.2);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            box-shadow: 0 18px 42px rgba(0, 0, 0, 0.16);
         }
 
         .pdf-hero::before {
@@ -296,33 +297,125 @@
             z-index: 1;
         }
 
-        .pdf-hero-emoji {
-            font-size: 26px;
-            margin-bottom: 12px;
-            display: block;
+        .pdf-hero::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(115deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 38%);
+            opacity: 0.45;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .pdf-hero-layout {
             position: relative;
             z-index: 2;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .pdf-hero-top {
+            display: flex;
+            align-items: flex-start;
+            gap: 18px;
+        }
+
+        .pdf-hero-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            background: rgba(255, 255, 255, 0.18);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.16),
+                0 16px 28px rgba(0, 0, 0, 0.12);
+            color: inherit;
+        }
+
+        .pdf-hero-emoji {
+            font-size: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            color: inherit;
+        }
+
+        .pdf-hero-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .pdf-hero-kicker {
+            display: inline-flex;
+            align-items: center;
+            align-self: flex-start;
+            min-height: 32px;
+            padding: 0 13px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.16);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: inherit;
+            opacity: 0.86;
         }
 
         .pdf-hero-title {
-            font-size: 24px;
+            font-size: 29px;
             font-weight: 900;
             color: #fff;
-            letter-spacing: -0.5px;
-            margin-bottom: 8px;
-            line-height: 1.1;
-            position: relative;
-            z-index: 2;
+            letter-spacing: -0.04em;
+            line-height: 1.04;
+            margin: 0;
+            max-width: 560px;
+            white-space: normal;
         }
 
         .pdf-hero-msg {
-            font-size: 13px;
-            line-height: 1.7;
+            font-size: 13.5px;
+            line-height: 1.72;
             color: rgba(255,255,255,0.7);
             font-weight: 500;
-            max-width: 520px;
-            position: relative;
-            z-index: 2;
+            max-width: 560px;
+            margin: 0;
+        }
+
+        .pdf-hero-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .pdf-hero-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 36px;
+            padding: 0 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.14);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+            color: inherit;
+            font-size: 10.5px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            opacity: 0.9;
+        }
+
+        .pdf-hero-pill i {
+            font-size: 11px;
         }
 
         .pdf-page.gold-style:not(.artist-edition):not(.dark-mode) .pdf-header-badge {
@@ -1401,9 +1494,9 @@
             -webkit-text-fill-color: var(--artist-title-color);
             -webkit-text-stroke: 0.5px rgba(13, 11, 10, 0.22);
             text-shadow: 0 2px 0 rgba(22, 16, 12, 0.12), 0 10px 24px rgba(0, 0, 0, 0.22);
-            font-size: 28px;
+            font-size: 26px;
             line-height: 1.06;
-            max-width: 560px;
+            max-width: 100%;
         }
 
         .pdf-page.artist-edition .pdf-hero-msg {
@@ -1630,19 +1723,19 @@
     <nav>
         <div class="nav-left">
             <div class="brand">STUDIO<span>X</span></div>
-            <div class="nav-badge">👁 LIVE PREVIEW</div>
+            <div class="nav-badge"><i class="fa-solid fa-eye"></i> LIVE PREVIEW</div>
         </div>
         <div class="nav-actions">
-            <a href="{{ route('pdf.edit', $record->id) }}" class="btn btn-ghost">✏️ Edit</a>
-            <a href="{{ route('dashboard') }}" class="btn btn-ghost">← Dashboard</a>
-            <button id="downloadBtn" class="btn btn-primary">⬇️ Download PDF</button>
+            <a href="{{ route('pdf.edit', $record->id) }}" class="btn btn-ghost"><i class="fa-solid fa-pen-to-square"></i> Edit</a>
+            <a href="{{ route('dashboard') }}" class="btn btn-ghost">Back to Dashboard</a>
+            <button id="downloadBtn" class="btn btn-primary"><i class="fa-solid fa-download"></i> Download PDF</button>
         </div>
     </nav>
 
     <div class="preview-wrapper">
         <div class="preview-meta">
-            <h2>📄 {{ $record->store_name }} — Download Card Preview</h2>
-            <p>Exactly wahi design jo aapki PDF mein milegi buyer ko</p>
+            <h2><i class="fa-solid fa-file-lines"></i> {{ $record->store_name }} - Download Card Preview</h2>
+            <p>This is the exact design your buyer will see in the PDF</p>
         </div>
 
         <div id="preview-outer">
@@ -1662,6 +1755,42 @@
                     ];
                     $theme = $themeMap[$record->theme] ?? 'gold-style';
                     $products = $record->products ?? [];
+                    $productIconMap = [
+                        'fa-palette' => '<i class="fa-solid fa-palette" aria-hidden="true"></i>',
+                        'fa-clapperboard' => '<i class="fa-solid fa-clapperboard" aria-hidden="true"></i>',
+                        'fa-mountain-sun' => '<i class="fa-solid fa-mountain-sun" aria-hidden="true"></i>',
+                        'fa-camera' => '<i class="fa-solid fa-camera" aria-hidden="true"></i>',
+                        'fa-image' => '<i class="fa-solid fa-image" aria-hidden="true"></i>',
+                        'fa-music' => '<i class="fa-solid fa-music" aria-hidden="true"></i>',
+                        'fa-ruler-combined' => '<i class="fa-solid fa-ruler-combined" aria-hidden="true"></i>',
+                        'fa-paint-brush' => '<i class="fa-solid fa-paint-brush" aria-hidden="true"></i>',
+                        'fa-lightbulb' => '<i class="fa-solid fa-paint-brush" aria-hidden="true"></i>',
+                        'fa-fire' => '<i class="fa-solid fa-fire" aria-hidden="true"></i>',
+                        'fa-star' => '<i class="fa-solid fa-star" aria-hidden="true"></i>',
+                    ];
+                    $resolveProductIcon = function ($value) use ($productIconMap) {
+                        $raw = is_string($value) ? $value : '';
+                        if (preg_match_all('/fa-[a-z0-9-]+/i', $raw, $matches)) {
+                            $ignored = ['fa-solid', 'fa-regular', 'fa-brands', 'fa-light', 'fa-thin', 'fa-duotone', 'fa-sharp'];
+                            foreach ($matches[0] as $match) {
+                                $iconName = strtolower($match);
+                                if (in_array($iconName, $ignored, true)) {
+                                    continue;
+                                }
+                                if ($iconName === 'fa-sparkles') {
+                                    $iconName = 'fa-star';
+                                } elseif ($iconName === 'fa-lightbulb') {
+                                    $iconName = 'fa-paint-brush';
+                                }
+                                if (isset($productIconMap[$iconName])) {
+                                    return $productIconMap[$iconName];
+                                }
+                                break;
+                            }
+                        }
+
+                        return $productIconMap['fa-palette'];
+                    };
                     $numClass = [
                         'gold-style' => 'gold',
                         'rose-style' => 'rose',
@@ -1676,17 +1805,29 @@
                         (string) ($record->welcome_msg ?? ''),
                         json_encode($products),
                     ])));
-                    $isArtistLayout = preg_match('/drdoom|doom|procreate|brushset|brush library|ipad/', $artistProbe) === 1;
+                    $isArtistLayout = preg_match('/drdoom|doom|procreate|brushset|brush library|ipad|paint-brush|fa-paint-brush|fa-lightbulb/', $artistProbe) === 1;
 
                     $storeName = $record->store_name;
                     $upper = strtoupper($storeName);
                     $mid = (int) ceil(strlen($upper) / 2);
                     $logoFirst = substr($upper, 0, $mid);
                     $logoLast = substr($upper, $mid);
+                    $defaultWelcomeTitle = 'Your Files are Ready!';
+                    $artistWelcomeTitle = 'Your Procreate Brush Library Is Ready';
+                    $defaultWelcomeMessage = 'Thank you for your purchase! We\'ve put a lot of love into these assets. If you need any help, just message us on Etsy.';
+                    $artistWelcomeMessage = 'Thank you for supporting independent art. Every file in this order was prepared for a smooth Procreate workflow on iPad.';
+                    $welcomeTitle = trim(strip_tags((string) ($record->welcome_title ?? '')));
+                    if ($welcomeTitle === '' || ($isArtistLayout && $welcomeTitle === $defaultWelcomeTitle)) {
+                        $welcomeTitle = $isArtistLayout ? $artistWelcomeTitle : $defaultWelcomeTitle;
+                    }
+                    $welcomeMessage = trim(strip_tags((string) ($record->welcome_msg ?? $record->message ?? $defaultWelcomeMessage)));
+                    if ($welcomeMessage === '' || ($isArtistLayout && $welcomeMessage === $defaultWelcomeMessage)) {
+                        $welcomeMessage = $isArtistLayout ? $artistWelcomeMessage : $defaultWelcomeMessage;
+                    }
                     $tagline = $isArtistLayout ? 'INDEPENDENT DIGITAL ARTIST' : 'DIGITAL DOWNLOAD STORE';
                     $badgeLine1 = $isArtistLayout ? 'AUTHENTIC PROCREATE RELEASE' : 'EXCLUSIVE DIGITAL DELIVERY';
                     $badgeLine2 = $isArtistLayout ? 'Artist Download Guide' : 'Thank You Card';
-                    $heroEmoji = $isArtistLayout ? '🖌️' : '🎉';
+                    $heroEmoji = $isArtistLayout ? '<i class="fa-solid fa-paint-brush" aria-hidden="true"></i>' : '<i class="fa-solid fa-gift" aria-hidden="true"></i>';
                     $sectionLabel = $isArtistLayout ? 'YOUR PROCREATE DOWNLOADS' : 'YOUR DOWNLOAD LINKS';
                     $howTitle = $isArtistLayout ? 'PROCREATE INSTALL GUIDE' : 'HOW TO USE YOUR FILES';
                     $reviewCta = $isArtistLayout ? 'SUPPORT THIS ARTIST' : 'LEAVE A REVIEW';
@@ -1722,16 +1863,29 @@
                         </div>
                         <div class="pdf-header-badge">
                             <div class="pdf-badge-line1">{{ $badgeLine1 }}</div>
-                            <div class="pdf-badge-line2">✦ Thank You Card</div>
+                            <div class="pdf-badge-line2"><i class="fa-solid fa-star-of-life"></i> Thank You Card</div>
                         </div>
                     </div>
 
                     <!-- HERO -->
                     <div class="pdf-hero">
-                        <span class="pdf-hero-emoji">🎉</span>
-                        <div class="pdf-hero-title">{{ $record->welcome_title ?? 'Your Files are Ready! ✨' }}</div>
-                        <div class="pdf-hero-msg">
-                            {{ $record->welcome_msg ?? $record->message ?? 'Thank you for your purchase! We\'ve put a lot of love into these assets.' }}
+                        <div class="pdf-hero-layout">
+                            <div class="pdf-hero-top">
+                                <div class="pdf-hero-icon">
+                                    <span class="pdf-hero-emoji">{!! $heroEmoji !!}</span>
+                                </div>
+                                <div class="pdf-hero-copy">
+                                    <div class="pdf-hero-kicker">Digital Delivery Ready</div>
+                                    <div class="pdf-hero-title">{{ $welcomeTitle }}</div>
+                                </div>
+                            </div>
+                            <div class="pdf-hero-msg">
+                                {{ $welcomeMessage }}
+                            </div>
+                            <div class="pdf-hero-meta">
+                                <div class="pdf-hero-pill"><i class="fa-solid fa-link"></i> Access links included</div>
+                                <div class="pdf-hero-pill"><i class="fa-solid fa-comments"></i> Support available on Etsy</div>
+                            </div>
                         </div>
                     </div>
                     @if(!empty($trustChips))
@@ -1749,7 +1903,7 @@
                     <div class="pdf-section-label"><span>{{ $sectionLabel }}</span></div>
                     @foreach($products as $i => $product)
                         <div class="pdf-download-card {{ $theme }} {{ $isArtistLayout ? 'artist-card' : '' }}">
-                            <div class="card-icon-wrap">{{ $product['type'] ?? '🎨' }}</div>
+                            <div class="card-icon-wrap">{!! $resolveProductIcon($product['type'] ?? null) !!}</div>
                             <div class="card-body">
                                 <div class="card-num">FILE {{ str_pad($i + 1, 2, '0', STR_PAD_LEFT) }}</div>
                                 <div class="card-name">{{ $product['name'] ?? $defaultCardName }}</div>
@@ -1765,7 +1919,7 @@
                     <!-- HOW TO USE -->
                     @if($record->step1 || $record->step2 || $record->step3)
                         <div class="pdf-how-section">
-                            <div class="pdf-how-title">📖 HOW TO USE YOUR FILES</div>
+                            <div class="pdf-how-title"><i class="fa-solid fa-book-open"></i> HOW TO USE YOUR FILES</div>
                             <div class="pdf-steps">
                                 @foreach($steps as $step)
                                     @if($step['desc'])
@@ -1794,7 +1948,7 @@
                             </div>
                         </div>
                         <div class="pdf-footer-right">
-                            <div class="pdf-stars">⭐⭐⭐⭐⭐</div>
+                            <div class="pdf-stars"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></div>
                             <div class="pdf-review-cta">{{ $reviewCta }}</div>
                         </div>
                     </div>
@@ -1804,7 +1958,10 @@
         </div>
     </div>
 
-    <div id="toast"><span>✅</span><span id="toastMsg">Done!</span></div>
+    <div id="toast">
+        <span id="toastIcon" aria-hidden="true"><i class="fa-solid fa-circle-check"></i></span>
+        <span id="toastMsg">Done!</span>
+    </div>
 
     <script>
         function rescale() {
@@ -1824,7 +1981,7 @@
             if (badgeLine2) badgeLine2.textContent = @json($badgeLine2);
 
             const heroEmoji = document.querySelector('.pdf-hero-emoji');
-            if (heroEmoji) heroEmoji.textContent = @json($heroEmoji);
+            if (heroEmoji) heroEmoji.innerHTML = @json($heroEmoji);
 
             const howTitle = document.querySelector('.pdf-how-title');
             if (howTitle) howTitle.textContent = @json($howTitle);
@@ -1840,11 +1997,25 @@
             });
         }
 
+        document.querySelectorAll('.pdf-dl-btn').forEach((button) => {
+            button.innerHTML = '<i class="fa-solid fa-download" aria-hidden="true"></i> Download Now';
+        });
+
+        document.querySelectorAll('.card-sub').forEach((sub) => {
+            const text = (sub.textContent || '').trim();
+            if (/[^\x20-\x7E]/.test(text) && /instant access/i.test(text)) {
+                sub.textContent = 'Instant Access | Digital Download | No Expiry';
+            } else if (/[^\x20-\x7E]/.test(text) && /(brushset|procreate|ipad)/i.test(text)) {
+                sub.textContent = 'Artist-crafted .brushset file | Instant digital delivery | Ready for Procreate on iPad';
+            }
+        });
+
         rescale();
         window.addEventListener('resize', rescale);
 
-        function toast(msg) {
-            document.getElementById('toastMsg').textContent = msg;
+        function toast(message, iconClass = 'fa-circle-check') {
+            document.getElementById('toastIcon').innerHTML = `<i class="fa-solid ${iconClass}"></i>`;
+            document.getElementById('toastMsg').textContent = message;
             const t = document.getElementById('toast');
             t.classList.add('active');
             setTimeout(() => t.classList.remove('active'), 4000);
@@ -1882,12 +2053,15 @@
                     }
                 });
 
+                const pdfBlob = pdf.output('blob');
+                const sizeMB = (pdfBlob.size / (1024 * 1024)).toFixed(1);
+
                 pdf.save(`{{ Str::slug($record->store_name) }}-Download-Card.pdf`);
-                toast('✅ PDF download ho gayi!');
-            } catch (e) { toast('❌ Error: ' + e.message); }
+                toast(`PDF download ho gayi! (${sizeMB} MB)`);
+            } catch (e) { toast('Error: ' + e.message, 'fa-circle-xmark'); }
             finally {
                 rescale();
-                btn.disabled = false; btn.textContent = '⬇️ Download PDF';
+                btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-download"></i> Download PDF';
                 spinner.classList.remove('show');
             }
         });
@@ -1895,3 +2069,4 @@
 </body>
 
 </html>
+

@@ -201,6 +201,55 @@
     color: #fff;
     transform: translateY(-2px);
 }
+.insights-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 40px;
+}
+.insight-card {
+    margin: 0;
+    padding: 22px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border-color);
+    min-width: 0;
+    min-height: 142px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+.insight-authors {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-height: 40px;
+    align-content: flex-start;
+}
+.insight-value-large {
+    font-size: 2.35rem;
+    font-weight: 900;
+    color: var(--text-main);
+    line-height: 1;
+}
+.insight-value-success {
+    font-size: 1.5rem;
+    font-weight: 900;
+    color: var(--success);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+@media (max-width: 980px) {
+    .insights-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 640px) {
+    .insights-grid {
+        grid-template-columns: 1fr;
+    }
+}
 </style>
 <div class="stepper fade-in" style="max-width: 1000px;">
     <div class="step" id="step1">
@@ -232,24 +281,16 @@
 <div class="storage-card fade-in" style="max-width: 1000px; margin: 0 auto 32px;" id="storageControlCard">
     <div class="storage-info">
         <div class="storage-header">
-            <span class="storage-title">Engine Storage Usage</span>
-            <span class="storage-usage-text" id="storageUsageLabel">0 GB / 20 GB</span>
+            <span class="storage-title storage-label-text" id="storageLabelText">{{ (bool) config('services.google.owner_managed') ? 'Google Drive Usage' : 'Engine Storage Usage' }}</span>
+            <span class="storage-usage-text" id="storageUsageLabel">Loading...</span>
         </div>
         <div class="storage-bar-container">
             <div id="storageBarFill" class="storage-bar-fill storage-status-normal"></div>
         </div>
-        <div id="cleanupProgressWrap" style="display: none; margin-top: 12px;">
-            <div class="progress-track" style="margin: 8px 0; height: 6px;">
-                <div id="cleanupProgressFill" class="progress-bar" style="width: 0%; height: 100%; background: #ef4444;"></div>
-            </div>
-            <p id="cleanupFeedback" class="drop-subtext" style="font-size: 0.65rem; color: #ef4444; font-weight: 700;"></p>
-        </div>
-    </div>
-    <div style="text-align: right;">
-        <button type="button" class="btn-clear-mem" id="cleanupBtn">
-            <span style="font-size: 1.1rem; vertical-align: middle; margin-right: 4px;">🧹</span> 
-            CLEAR MEMORY
-        </button>
+        <p id="storageUsageNote" class="drop-subtext" style="margin-top: 10px; font-size: 0.72rem; color: var(--text-dim);">Fetching storage usage...</p>
+        @if(auth()->user()->is_admin)
+            <a id="storageRootFolderLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="margin-top: 12px; display: none; width: fit-content;">Open Drive Storage Folder</a>
+        @endif
     </div>
 </div>
 
@@ -269,7 +310,7 @@
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 32px; align-items: stretch;">
             <!-- LOCAL DROPZONE -->
             <div class="dropzone" id="dropzone" style="cursor: pointer; height: 100%; display: flex; flex-direction: column; justify-content: center; margin: 0;">
-                <span class="drop-icon" style="pointer-events: none;">📁</span>
+                <span class="drop-icon" style="pointer-events: none;"><i class="fa-solid fa-folder-open" aria-hidden="true"></i></span>
                 <p class="drop-text" style="pointer-events: none;">Drag files here or click to browse</p>
                 <p class="drop-subtext" style="pointer-events: none; margin-top: 8px;">Supports .brushset, .brush, .procreate, .swatches, .usdz, and .zip</p>
             </div>
@@ -278,7 +319,7 @@
             <!-- LINK UPLOAD -->
             <div class="studio-card" style="margin: 0; padding: 32px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); display: flex; flex-direction: column; justify-content: center;">
                 <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
-                    <div style="padding: 10px; background: rgba(249, 115, 22, 0.1); border-radius: 12px; font-size: 1.5rem;">🔗</div>
+                    <div style="padding: 10px; background: rgba(249, 115, 22, 0.1); border-radius: 12px; font-size: 1.5rem; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;"><i class="fa-solid fa-link"></i></div>
                     <div>
                         <h3 style="margin: 0; font-size: 1.15rem; font-weight: 800;">Cloud Import</h3>
                         <p class="drop-subtext" style="font-size: 0.75rem; color: var(--text-muted);">Paste Google Drive or direct links</p>
@@ -332,19 +373,19 @@
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; max-width: 750px; margin: 0 auto;">
             <div class="stat-box" style="background: rgba(255,255,255,0.02); padding: 20px 16px; border-radius: 16px; border: 1px solid var(--border-color); backdrop-filter: blur(10px);">
-                <p class="control-label" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Upload Speed</p>
+                <p id="statSpeedLabel" class="control-label" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Upload Speed</p>
                 <p id="statSpeed" style="font-weight: 800; font-size: 1.1rem; color: var(--text-main);">Calculating...</p>
             </div>
             <div class="stat-box" style="background: rgba(255,255,255,0.02); padding: 20px 16px; border-radius: 16px; border: 1px solid var(--border-color); backdrop-filter: blur(10px);">
-                <p class="control-label" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Transferred</p>
+                <p id="statTransferredLabel" class="control-label" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Transferred</p>
                 <p id="statTransferred" style="font-weight: 800; font-size: 1.1rem; color: var(--text-main);">0 B / 0 B</p>
             </div>
             <div class="stat-box" style="background: rgba(255,255,255,0.02); padding: 20px 16px; border-radius: 16px; border: 1px solid var(--border-color); backdrop-filter: blur(10px);">
-                <p class="control-label" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">ETA</p>
+                <p id="statEtaLabel" class="control-label" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">ETA</p>
                 <p id="statEta" style="font-weight: 800; font-size: 1.1rem; color: var(--text-main);">Calculating...</p>
             </div>
             <div class="stat-box" style="background: rgba(255,255,255,0.02); padding: 20px 16px; border-radius: 16px; border: 1px solid var(--border-color); backdrop-filter: blur(10px);">
-                <p class="control-label" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Files</p>
+                <p id="statFilesLabel" class="control-label" style="font-size: 0.65rem; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Files</p>
                 <p id="statFiles" style="font-weight: 800; font-size: 1.1rem; color: var(--text-main);">0 / 0</p>
             </div>
         </div>
@@ -363,25 +404,25 @@
         </div>
 
         <!-- STATS GRID -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px; margin-bottom: 40px;">
-            <div class="studio-card" style="margin: 0; padding: 24px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color);">
+        <div class="insights-grid">
+            <div class="studio-card insight-card">
                 <p class="control-label" style="font-size: 0.7rem; margin-bottom: 12px; opacity: 0.6;">DETECTED AUTHORS</p>
-                <div id="detectedAuthorsList" style="display: flex; gap: 8px; flex-wrap: wrap; min-height: 40px; align-content: flex-start;">
+                <div id="detectedAuthorsList" class="insight-authors">
                     <!-- Authors injected here -->
                 </div>
             </div>
-            <div class="studio-card" style="margin: 0; padding: 24px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color);">
+            <div class="studio-card insight-card">
                 <p class="control-label" style="font-size: 0.7rem; margin-bottom: 12px; opacity: 0.6;">TOTAL ASSETS FOUND</p>
-                <div id="totalAssetsCount" style="font-size: 2.5rem; font-weight: 900; color: var(--text-main);">0</div>
+                <div id="totalAssetsCount" class="insight-value-large">0</div>
             </div>
-            <div class="studio-card" style="margin: 0; padding: 24px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color);">
+            <div class="studio-card insight-card">
                 <p class="control-label" style="font-size: 0.7rem; margin-bottom: 12px; opacity: 0.6;">UPLOADED FILES</p>
-                <div id="uploadedFilesCount" style="font-size: 2.5rem; font-weight: 900; color: var(--text-main);">0</div>
+                <div id="uploadedFilesCount" class="insight-value-large">0</div>
             </div>
-            <div class="studio-card" style="margin: 0; padding: 24px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color);">
+            <div class="studio-card insight-card">
                 <p class="control-label" style="font-size: 0.7rem; margin-bottom: 12px; opacity: 0.6;">INTEGRITY STATUS</p>
-                <div style="font-size: 1.5rem; font-weight: 900; color: var(--success); display: flex; align-items: center; gap: 8px;">
-                    Verified <span style="font-size: 1rem; opacity: 0.8;">📦</span>
+                <div class="insight-value-success">
+                    Verified <span style="font-size: 1rem; opacity: 0.8;"><i class="fa-solid fa-box-check"></i></span>
                 </div>
             </div>
         </div>
@@ -436,7 +477,7 @@
                     <label class="control-label" style="font-size: 0.65rem; letter-spacing: 0.05em;">SIGNATURE (PNG) <span style="opacity: 0.5;">- required</span></label>
                     <div style="display: flex; gap: 8px;">
                         <input id="sigFileName" class="text-input" type="text" readonly placeholder="No file selected" style="background: rgba(0,0,0,0.3); height: 52px; flex: 1; font-size: 0.8rem; opacity: 0.7;">
-                        <button type="button" onclick="document.getElementById('sigInput').click()" class="btn btn-secondary" style="height: 52px; width: 60px; padding: 0;">📁</button>
+                        <button type="button" onclick="document.getElementById('sigInput').click()" class="btn btn-secondary" style="height: 52px; width: 60px; padding: 0; display: flex; align-items: center; justify-content: center;"><i class="fa-solid fa-folder-open" aria-hidden="true"></i></button>
                     </div>
                     <input id="sigInput" type="file" hidden accept=".png">
                     <p id="clearSig" class="drop-subtext" style="font-size: 0.65rem; color: var(--primary); cursor: pointer; text-transform: uppercase; margin-top: 8px; display: none;">Clear Signature</p>
@@ -445,7 +486,7 @@
                     <label class="control-label" style="font-size: 0.65rem; letter-spacing: 0.05em;">AUTHOR PIC (PNG) <span style="opacity: 0.5;">- required</span></label>
                     <div style="display: flex; gap: 8px;">
                         <input id="picFileName" class="text-input" type="text" readonly placeholder="No file selected" style="background: rgba(0,0,0,0.3); height: 52px; flex: 1; font-size: 0.8rem; opacity: 0.7;">
-                        <button type="button" onclick="document.getElementById('picInput').click()" class="btn btn-secondary" style="height: 52px; width: 60px; padding: 0;">📁</button>
+                        <button type="button" onclick="document.getElementById('picInput').click()" class="btn btn-secondary" style="height: 52px; width: 60px; padding: 0; display: flex; align-items: center; justify-content: center;"><i class="fa-solid fa-folder-open" aria-hidden="true"></i></button>
                     </div>
                     <input id="picInput" type="file" hidden accept=".png">
                     <p id="clearPic" class="drop-subtext" style="font-size: 0.65rem; color: var(--primary); cursor: pointer; text-transform: uppercase; margin-top: 8px; display: none;">Clear Picture</p>
@@ -503,7 +544,7 @@
 
     <!-- STEP 6: DOWNLOAD -->
     <section id="completedSection" class="status-card" style="display: none;">
-        <div class="logo-icon" style="margin: 0 auto 24px; background: var(--success);">✓</div>
+        <div class="logo-icon" style="margin: 0 auto 24px; background: var(--success);"><i class="fa-solid fa-check"></i></div>
         <h2 class="section-title">Step 6: Download Complete</h2>
         <p class="drop-subtext">All files have been successfully rebranded with your info.</p>
         <div id="outputContainer" style="margin: 32px 0;"></div>
@@ -534,9 +575,14 @@
         clientId: '{{ config("services.google.client_id") }}',
         appId: '{{ config("services.google.app_id") }}'
     };
+    const OWNER_MANAGED_DRIVE = @json((bool) config('services.google.owner_managed'));
+    const GOOGLE_DRIVE_SCOPES = [
+        'https://www.googleapis.com/auth/drive.file',
+        'https://www.googleapis.com/auth/drive.metadata.readonly'
+    ].join(' ');
 
     let pickerApiLoaded = false;
-    let oauthToken = null;
+    window.oauthToken = null;
 
     // Load the Google API Loader script
     function loadGoogleApi() {
@@ -555,26 +601,68 @@
         pickerApiLoaded = true;
     }
 
+    function showGoogleDriveAccessError(detail = '') {
+        const rawDetail = String(detail || '').trim();
+        const normalizedDetail = rawDetail.toLowerCase();
+        const testingModeHint = normalizedDetail.includes('access_denied')
+            || normalizedDetail.includes('consent')
+            || normalizedDetail.includes('test')
+            || normalizedDetail.includes('unverified');
+        const originHint = normalizedDetail.includes('origin');
+        const popupHint = normalizedDetail.includes('popup') || normalizedDetail.includes('closed');
+        const detailSuffix = rawDetail ? ` Details: ${rawDetail}` : '';
+
+        state.status = 'error';
+        elements.errorMessage.innerText = testingModeHint
+            ? 'Google Drive access was blocked. If your OAuth consent screen is still in Testing, add the same Google account under Test users in Google Cloud Console and try again.'
+            : originHint
+                ? 'Google rejected this app origin. Add the exact URL you are opening in the browser to Authorized JavaScript origins in the Google OAuth client, then try again.'
+                : popupHint
+                    ? 'Google sign-in popup was closed or blocked before authorization finished. Reopen it and allow the popup to continue.'
+                    : 'Google Drive authorization failed. Verify the OAuth consent screen, authorized JavaScript origins, and selected Google account, then try again.';
+        if (detailSuffix) {
+            elements.errorMessage.innerText += detailSuffix;
+        }
+        console.error('Google Drive auth error:', rawDetail || 'unknown');
+        updateView();
+    }
+
     function handleDriveAction() {
         if (!GOOGLE_DRIVE_CONFIG.clientId || !GOOGLE_DRIVE_CONFIG.apiKey) {
             alert("Google Drive is not fully configured. Please set GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_API_KEY in .env");
             return;
         }
 
+        if (!window.google?.accounts?.oauth2) {
+            showGoogleDriveAccessError('google_identity_services_not_loaded');
+            return;
+        }
+
         const tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: GOOGLE_DRIVE_CONFIG.clientId,
-            scope: 'https://www.googleapis.com/auth/drive.readonly',
+            scope: GOOGLE_DRIVE_SCOPES,
             callback: (response) => {
-                if (response.error !== undefined) throw (response);
-                oauthToken = response.access_token;
+                if (response.error !== undefined) {
+                    showGoogleDriveAccessError(response.error_description || response.error);
+                    return;
+                }
+                window.oauthToken = response.access_token;
+                refreshStorageStats(); // Refresh stats immediately after login
                 createPicker();
+            },
+            error_callback: (error) => {
+                showGoogleDriveAccessError(error?.message || error?.type || 'oauth_request_failed');
             },
         });
 
-        if (oauthToken === null) {
-            tokenClient.requestAccessToken({prompt: 'consent'});
-        } else {
-            tokenClient.requestAccessToken({prompt: ''});
+        try {
+            if (oauthToken === null) {
+                tokenClient.requestAccessToken({prompt: 'consent'});
+            } else {
+                tokenClient.requestAccessToken({prompt: ''});
+            }
+        } catch (error) {
+            showGoogleDriveAccessError(error?.message || 'oauth_request_failed');
         }
     }
 
@@ -609,7 +697,6 @@
             if (elements.stageMessage) elements.stageMessage.innerText = "Securely fetching \"" + doc.name + "\" from your cloud storage.";
 
             try {
-                pollStatus();
                 const response = await apiFetch('/upload-url', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -626,6 +713,7 @@
 
                 const resData = await response.json();
                 state.jobId = resData.job_id;
+                state.driveStorage = resData.drive_storage || state.driveStorage;
                 state.status = 'uploaded';
                 updateView();
             } catch (error) {
@@ -641,7 +729,13 @@
     document.addEventListener('DOMContentLoaded', loadGoogleApi);
 
     const googleDriveBtn = document.getElementById('googleDriveBtn');
-    if (googleDriveBtn) googleDriveBtn.onclick = handleDriveAction;
+    if (googleDriveBtn) {
+        if (OWNER_MANAGED_DRIVE) {
+            googleDriveBtn.style.display = 'none';
+        } else {
+            googleDriveBtn.onclick = handleDriveAction;
+        }
+    }
     const normalizeBase = (value) => value ? value.replace(/\/$/, '') : '';
     const shouldRetryWithFallback = (status) => [404, 500, 502, 503, 504].includes(status);
 
@@ -703,6 +797,29 @@
         return text ? `${fallback} (${response.status}): ${text.slice(0, 180)}` : `${fallback} (${response.status})`;
     }
 
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function getFilenameParts(filename) {
+        const safeName = String(filename ?? '');
+        const lastDotIndex = safeName.lastIndexOf('.');
+
+        if (lastDotIndex <= 0) {
+            return { base: safeName, extension: '' };
+        }
+
+        return {
+            base: safeName.slice(0, lastDotIndex),
+            extension: safeName.slice(lastDotIndex + 1),
+        };
+    }
+
     function buildUploadFormData(files) {
         const formData = new FormData();
         files.forEach(file => formData.append('files[]', file, file.name));
@@ -716,6 +833,7 @@
         const totalSize = files.reduce((acc, f) => acc + f.size, 0);
         let uploadedBytes = 0;
         const startTime = Date.now();
+        let completedFiles = 0;
 
         for (const file of files) {
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
@@ -751,6 +869,7 @@
                             
                             if (elements.statSpeed) elements.statSpeed.innerText = formatFileSize(speed) + "/s";
                             if (elements.statTransferred) elements.statTransferred.innerText = `${formatFileSize(currentUploaded)} / ${formatFileSize(totalSize)}`;
+                            if (elements.statFiles) elements.statFiles.innerText = `${completedFiles} / ${files.length}`;
                             if (elements.statEta) {
                                 if (eta > 0) {
                                     const mins = Math.floor(eta / 60);
@@ -778,13 +897,18 @@
                 }
                 uploadedBytes += (end - start);
             }
+            completedFiles += 1;
+            if (elements.statFiles) elements.statFiles.innerText = `${completedFiles} / ${files.length}`;
         }
 
         // Finalize
         const finalizeResp = await apiFetch('/finalize-upload', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ job_id: jobId })
+            body: JSON.stringify({
+                job_id: jobId,
+                drive_token: window.oauthToken || ''
+            })
         });
 
         if (!finalizeResp.ok) throw new Error('Finalize failed');
@@ -799,7 +923,17 @@
         outputs: [],
         bundle: null,
         storeName: '',
-        finalZipName: ''
+        finalZipName: '',
+        driveStorage: null,
+        progressValue: 0,
+        progressMeta: null,
+        uploadedFileCount: 0,
+        uploadedFileNames: [],
+        lastBackendProgressAt: 0,
+        renamingOutputIndex: null,
+        renameDraftValue: '',
+        renameSavingIndex: null,
+        renameErrorMessage: ''
     };
 
     const elements = {
@@ -822,9 +956,13 @@
         stageTitle: document.getElementById('stageTitle'),
         stageMessage: document.getElementById('stageMessage'),
         stageBadge: document.getElementById('stageBadge'),
+        statSpeedLabel: document.getElementById('statSpeedLabel'),
         statSpeed: document.getElementById('statSpeed'),
+        statTransferredLabel: document.getElementById('statTransferredLabel'),
         statTransferred: document.getElementById('statTransferred'),
+        statEtaLabel: document.getElementById('statEtaLabel'),
         statEta: document.getElementById('statEta'),
+        statFilesLabel: document.getElementById('statFilesLabel'),
         statFiles: document.getElementById('statFiles'),
         
         assetSummary: document.getElementById('assetSummary'),
@@ -832,14 +970,22 @@
         retryBtn: document.getElementById('retryBtn'),
         processMoreBtn: document.getElementById('processMoreBtn'),
         
-        cleanupBtn: document.getElementById('cleanupBtn'),
-        cleanupFeedback: document.getElementById('cleanupFeedback'),
-        cleanupProgressWrap: document.getElementById('cleanupProgressWrap'),
-        cleanupProgressFill: document.getElementById('cleanupProgressFill'),
-        
         backToUploadBtn: document.getElementById('backToUploadBtn'),
         backToScannedBtn: document.getElementById('backToScannedBtn')
     };
+
+    let stageActivityTimer = null;
+    let previewLoadObserver = null;
+    let storageStatsTimer = null;
+    let storageStatsInFlight = false;
+    let storageStatsFailCount = 0;
+
+    function setProgressDisplay(percent) {
+        const safePercent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+        state.progressValue = safePercent;
+        if (elements.progressPercent) elements.progressPercent.innerText = `${safePercent}%`;
+        if (elements.progressFill) elements.progressFill.style.width = `${safePercent}%`;
+    }
 
     function formatFileSize(bytes) {
         if (!bytes || bytes <= 0) return "0 B";
@@ -853,15 +999,238 @@
         return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
     }
 
+    function formatStorageAmount(bytes) {
+        if (!bytes || bytes <= 0) return "0 GB";
+        const gb = bytes / (1024 * 1024 * 1024);
+        if (gb >= 1024) {
+            const tb = gb / 1024;
+            return `${tb.toFixed(tb >= 10 ? 0 : 2)} TB`;
+        }
+
+        return `${gb.toFixed(gb >= 100 ? 0 : gb >= 10 ? 1 : 2)} GB`;
+    }
+
+    function formatElapsed(seconds) {
+        const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+        const mins = Math.floor(totalSeconds / 60);
+        const secs = totalSeconds % 60;
+        return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+    }
+
+    function summarizeName(value, max = 24) {
+        const text = String(value || '').trim();
+        if (!text) return 'Preparing...';
+        return text.length > max ? `${text.slice(0, max - 1)}...` : text;
+    }
+
+    function setProgressStats(stats) {
+        const mappings = [
+            ['statSpeedLabel', 'statSpeed', stats[0]],
+            ['statTransferredLabel', 'statTransferred', stats[1]],
+            ['statEtaLabel', 'statEta', stats[2]],
+            ['statFilesLabel', 'statFiles', stats[3]],
+        ];
+
+        mappings.forEach(([labelKey, valueKey, card]) => {
+            if (!card) return;
+            if (elements[labelKey]) elements[labelKey].innerText = card.label;
+            if (elements[valueKey]) elements[valueKey].innerText = card.value;
+        });
+    }
+
+    function getStageElapsedSeconds() {
+        return stageActivityTimer && stageActivityTimer.startedAt
+            ? Math.floor((Date.now() - stageActivityTimer.startedAt) / 1000)
+            : 0;
+    }
+
+    function stopStageActivity() {
+        if (stageActivityTimer?.intervalId) {
+            clearInterval(stageActivityTimer.intervalId);
+        }
+        stageActivityTimer = null;
+    }
+
+    function updateScanningStats(meta = null) {
+        const totalFiles = Number(meta?.total_files || state.uploadedFileCount || state.files.length || 1);
+        const currentFileIndex = Math.min(totalFiles, Math.max(1, Number(meta?.current_file_index || 1)));
+        const currentFileName = meta?.current_file_name || state.uploadedFileNames[currentFileIndex - 1] || state.uploadedFileNames[0] || 'Package';
+        const assetsFound = Number(meta?.assets_found || 0);
+        const detectedAuthors = Number(meta?.detected_authors || 0);
+        const elapsed = meta?.elapsed_seconds ?? getStageElapsedSeconds();
+
+        setProgressStats([
+            { label: 'Source Files', value: `${totalFiles}` },
+            { label: 'Current File', value: `${currentFileIndex} / ${totalFiles}` },
+            { label: 'Elapsed', value: formatElapsed(elapsed) },
+            { label: 'Detected', value: assetsFound > 0 ? `${assetsFound} assets${detectedAuthors > 0 ? ` • ${detectedAuthors} author` : ''}` : 'Scanning...' },
+        ]);
+
+        if (elements.stageTitle) elements.stageTitle.innerText = 'Analyzing Package...';
+        if (elements.stageMessage) {
+            if (meta?.current_file_name) {
+                elements.stageMessage.innerText = `Scanning ${currentFileIndex}/${totalFiles}: ${summarizeName(meta.current_file_name, 56)}`;
+            } else {
+                const elapsedSeconds = Number(elapsed || 0);
+                const phaseMessage = elapsedSeconds < 6
+                    ? 'Opening archive and indexing folders.'
+                    : elapsedSeconds < 14
+                        ? 'Reading binary plists and embedded metadata.'
+                        : 'Cataloging preview assets and author signatures.';
+                elements.stageMessage.innerText = `${phaseMessage} ${summarizeName(currentFileName, 40)}`;
+            }
+        }
+    }
+
+    function updateProcessingStats(meta = null) {
+        const totalFiles = Number(meta?.total_files || state.manifest?.source_files?.length || state.uploadedFileCount || 1);
+        const currentFileIndex = Math.min(totalFiles, Math.max(1, Number(meta?.current_file_index || 1)));
+        const currentFileName = meta?.current_file_name || state.uploadedFileNames[currentFileIndex - 1] || state.uploadedFileNames[0] || 'Package';
+        const elapsed = meta?.elapsed_seconds ?? getStageElapsedSeconds();
+        const action = String(meta?.action || 'Rebrand + Zip');
+
+        setProgressStats([
+            { label: 'Source Files', value: `${totalFiles}` },
+            { label: 'Current File', value: `${currentFileIndex} / ${totalFiles}` },
+            { label: 'Elapsed', value: formatElapsed(elapsed) },
+            { label: 'Action', value: summarizeName(action, 24) },
+        ]);
+
+        if (elements.stageTitle) elements.stageTitle.innerText = 'Applying Rebrand...';
+        if (elements.stageMessage) {
+            elements.stageMessage.innerText = meta?.current_file_name
+                ? `Processing ${currentFileIndex}/${totalFiles}: ${summarizeName(meta.current_file_name, 56)}`
+                : 'Rewriting metadata, replacing identity assets, and packaging results.';
+        }
+    }
+
+    function startStageActivity(mode) {
+        stopStageActivity();
+
+        stageActivityTimer = {
+            mode,
+            startedAt: Date.now(),
+            intervalId: window.setInterval(() => {
+                const backendFresh = (Date.now() - (state.lastBackendProgressAt || 0)) < 2200;
+                if (backendFresh) {
+                    return;
+                }
+
+                if (mode === 'scanning') {
+                    const elapsed = getStageElapsedSeconds();
+                    const pseudoPercent = Math.min(93, 3 + Math.floor(Math.sqrt(elapsed + 1) * 12));
+                    if (pseudoPercent > state.progressValue) {
+                        setProgressDisplay(pseudoPercent);
+                    }
+                    updateScanningStats(state.progressMeta);
+                } else if (mode === 'processing') {
+                    const elapsed = getStageElapsedSeconds();
+                    const pseudoPercent = Math.min(97, 8 + Math.floor(Math.sqrt(elapsed + 1) * 10));
+                    if (pseudoPercent > state.progressValue) {
+                        setProgressDisplay(pseudoPercent);
+                    }
+                    updateProcessingStats(state.progressMeta);
+                }
+            }, 500)
+        };
+    }
+
+    function shouldRenderAssetPreview(asset) {
+        const path = String(asset?.rel_path || asset?.file || '').toLowerCase();
+        const name = String(asset?.name || path.split('/').pop() || '').toLowerCase();
+
+        if (!/\.(png|jpg|jpeg|gif|webp)$/i.test(path)) {
+            return false;
+        }
+
+        // Skip heavy texture maps on the initial grid to keep refresh fast.
+        if (name === 'grain.png' || name === 'shape.png') {
+            return false;
+        }
+
+        return true;
+    }
+
+    function getRenderablePreviewAssets(assets) {
+        return assets.filter(shouldRenderAssetPreview).slice(0, 24);
+    }
+
+    function revealPreviewImage(img) {
+        if (!img || img.dataset.previewLoaded === 'true') {
+            return;
+        }
+
+        const previewSrc = img.dataset.previewSrc;
+        if (!previewSrc) {
+            return;
+        }
+
+        img.dataset.previewLoaded = 'true';
+        img.src = previewSrc;
+    }
+
+    function initializeAssetPreviews() {
+        if (previewLoadObserver) {
+            previewLoadObserver.disconnect();
+            previewLoadObserver = null;
+        }
+
+        const previewImages = Array.from(document.querySelectorAll('[data-asset-preview]'));
+        if (previewImages.length === 0) {
+            return;
+        }
+
+        previewImages.forEach((img, index) => {
+            if (index < 6) {
+                img.loading = 'eager';
+                img.fetchPriority = index < 3 ? 'high' : 'auto';
+                revealPreviewImage(img);
+            }
+        });
+
+        if (!('IntersectionObserver' in window)) {
+            previewImages.slice(6).forEach(revealPreviewImage);
+            return;
+        }
+
+        previewLoadObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) {
+                    return;
+                }
+
+                revealPreviewImage(entry.target);
+                previewLoadObserver?.unobserve(entry.target);
+            });
+        }, {
+            rootMargin: '220px 0px',
+            threshold: 0.01,
+        });
+
+        previewImages.slice(6).forEach((img) => {
+            img.loading = 'lazy';
+            img.fetchPriority = 'low';
+            previewLoadObserver.observe(img);
+        });
+    }
+
+    function getDriveStorageStatusText() {
+        if (!state.driveStorage) return '';
+        if (state.driveStorage.status === 'error') return state.driveStorage.error || 'Drive sync failed';
+        if (state.driveStorage.status === 'out_of_sync') return state.driveStorage.error || 'Drive copy needs resync';
+        if (state.driveStorage.job_folder_url) return 'Google Drive storage is connected for this job';
+        return '';
+    }
+
     function getFileIcon(filename) {
         const ext = filename.split('.').pop().toLowerCase();
         switch(ext) {
             case 'brush':
-            case 'brushset': return '🎨';
-            case 'procreate': return '🖼️';
-            case 'swatches': return '🌈';
-            case 'usdz': return '📦';
-            default: return '📄';
+            case 'brushset': return '<i class="fa-solid fa-palette"></i>';
+            case 'procreate': return '<i class="fa-solid fa-image"></i>';
+            case 'swatches': return '<i class="fa-solid fa-rainbow"></i>';
+            case 'usdz': return '<i class="fa-solid fa-box"></i>';
+            default: return '<i class="fa-solid fa-file"></i>';
         }
     }
 
@@ -905,6 +1274,10 @@
         [elements.idleSection, elements.progressSection, elements.scannedSection, elements.reeditSection, elements.completedSection, elements.errorSection]
             .forEach(s => { if(s) s.style.display = 'none'; });
 
+        if (!['uploading', 'scanning', 'processing'].includes(state.status)) {
+            stopStageActivity();
+        }
+
         if (state.status === 'idle') {
             elements.idleSection.style.display = 'block';
             s1.classList.add('active');
@@ -917,23 +1290,23 @@
                 elements.stageBadge.innerText = "STAGE 1";
                 elements.stageTitle.innerText = "Syncing to Engine...";
                 elements.stageMessage.innerText = "Encrypting and preparing your design workspace.";
+                setProgressStats([
+                    { label: 'Upload Speed', value: 'Calculating...' },
+                    { label: 'Transferred', value: '0 B / 0 B' },
+                    { label: 'ETA', value: 'Calculating...' },
+                    { label: 'Files', value: '0 / 0' },
+                ]);
             } else if (state.status === 'scanning') {
                 s1.classList.add('completed');
                 s2.classList.add('active');
                 elements.stageBadge.innerText = "STAGE 2";
-                elements.stageTitle.innerText = "Analyzing Plist...";
-                elements.stageMessage.innerText = "Deep scanning binary plists and asset metadata.";
+                updateScanningStats(state.progressMeta);
             } else if (state.status === 'processing') {
                 [s1, s2, s3].forEach(s => s.classList.add('completed'));
                 s4.classList.add('active');
                 elements.stageBadge.innerText = "STAGE 4";
-                elements.stageTitle.innerText = "Applying Rebrand...";
-                elements.stageMessage.innerText = "Injecting new identity and repackaging files.";
+                updateProcessingStats(state.progressMeta);
             }
-
-            // Reset progress UI if we just entered a processing state
-            if (elements.progressPercent) elements.progressPercent.innerText = "1%";
-            if (elements.progressFill) elements.progressFill.style.width = "1%";
         } else if (state.status === 'uploaded') {
             // Step 2 starts
             s1.classList.add('completed');
@@ -999,6 +1372,9 @@
         const authors = Array.isArray(m.detected_authors) ? m.detected_authors : [];
         const assets = Array.isArray(m.assets) ? m.assets : [];
         const sources = Array.isArray(m.source_files) ? m.source_files : []; 
+        const previewAssets = getRenderablePreviewAssets(assets);
+        const totalPreviewableAssets = assets.filter(shouldRenderAssetPreview).length;
+        const hiddenPreviewCount = Math.max(0, totalPreviewableAssets - previewAssets.length);
         
         // Update Stats
         document.getElementById('detectedAuthorsList').innerHTML = authors.map(a => `
@@ -1037,7 +1413,7 @@
         
         // Asset Preview Grid
         const previewGrid = document.getElementById('assetPreviewGrid');
-        previewGrid.innerHTML = assets.slice(0, 50).map(asset => {
+        previewGrid.innerHTML = previewAssets.map(asset => {
             const path = asset.rel_path || "";
             const isImage = /\.(png|jpg|jpeg|gif|webp)$/i.test(path);
             const resolvedApiBase = getResolvedApiBase();
@@ -1047,7 +1423,10 @@
             return `
                 <div class="studio-card" style="margin: 0; padding: 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05); overflow: hidden;">
                     <div style="aspect-ratio: 4/3; background: #111; background-image: linear-gradient(45deg, #181818 25%, transparent 25%), linear-gradient(-45deg, #181818 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #181818 75%), linear-gradient(-45deg, transparent 75%, #181818 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px; border-radius: 8px; margin-bottom: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;">
-                        ${previewUrl ? `<img src="${previewUrl}" style="max-width: 100%; max-height: 100%; object-fit: contain;">` : `<span style="font-size: 2rem;">${getFileIcon(path)}</span>`}
+                        ${previewUrl ? `
+                            <img data-asset-preview="true" data-preview-src="${previewUrl}" decoding="async" alt="${asset.name || path.split('/').pop()}" style="max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.2s ease; position: relative; z-index: 1;" onload="this.style.opacity='1'; const status=this.parentElement.querySelector('[data-preview-status]'); if(status) status.remove();" onerror="this.remove(); const status=this.parentElement.querySelector('[data-preview-status]'); if(status) status.innerText='Preview unavailable';">
+                            <span data-preview-status style="position: absolute; inset: auto 12px 12px 12px; font-size: 0.7rem; font-weight: 700; text-align: center; color: rgba(255,255,255,0.8); background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; padding: 6px 10px; z-index: 2;">Loading preview...</span>
+                        ` : `<span style="font-size: 2rem;">${getFileIcon(path)}</span>`}
                         <a href="${downloadUrl}" target="_blank" class="badge" style="position: absolute; top: 8px; left: 8px; font-size: 0.6rem; padding: 2px 6px; background: rgba(0,0,0,0.8); border: none; cursor: pointer; text-decoration: none;">DOWNLOAD</a>
                         <span style="position: absolute; top: 8px; right: 8px; font-size: 0.65rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase;">${asset.category || 'asset'}</span>
                     </div>
@@ -1062,6 +1441,10 @@
                 </div>
             `;
         }).join('') || '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-dim);">No previewable assets found in the scan.</div>';
+        if (hiddenPreviewCount > 0) {
+            previewGrid.insertAdjacentHTML('beforeend', `<div style="grid-column: 1/-1; text-align: center; padding: 12px 16px; color: var(--text-dim); font-size: 0.78rem;">Showing ${previewAssets.length} lightweight previews. ${hiddenPreviewCount} additional heavy assets were skipped to keep the page fast.</div>`);
+        }
+        initializeAssetPreviews();
 
         // Source List
         const sourceList = document.getElementById('sourceFilesList');
@@ -1173,7 +1556,7 @@
         const rebrandBtn = document.getElementById('rebrandBtn');
         if (rebrandBtn) rebrandBtn.onclick = handleRebrand;
 
-        // Save Config → POST to API & store final_zip_name in state
+        // Save Config -> POST to API & store final_zip_name in state
         const saveConfigBtn = document.getElementById('saveConfigBtn');
         if (saveConfigBtn) {
             saveConfigBtn.onclick = async () => {
@@ -1202,7 +1585,7 @@
                     if (data.store_name)     state.storeName    = data.store_name;
                     if (data.author_name)    state.authorName   = data.author_name;
 
-                    saveConfigBtn.innerText          = '✓ Config Saved';
+                    saveConfigBtn.innerText          = '<i class="fa-solid fa-check"></i> Config Saved';
                     saveConfigBtn.style.background   = 'rgba(16,185,129,0.2)';
                     saveConfigBtn.style.borderColor  = '#10b981';
                     saveConfigBtn.style.color        = '#10b981';
@@ -1230,71 +1613,196 @@
         state.outputs.forEach((out, idx) => {
             const src = sources[idx] || { name: 'Unknown Source', size: 0, asset_count: 0, author_tags: [] };
             const authorTags = src.author_tags || [];
+            const isRenaming = state.renamingOutputIndex === idx;
+            const isSaving = state.renameSavingIndex === idx;
+            const sourceName = escapeHtml(src.name || 'Unknown Source');
+            const outputName = escapeHtml(out.name || 'Untitled Output');
+            const nameParts = getFilenameParts(out.name || '');
+            const renameDraft = escapeHtml(state.renameDraftValue || nameParts.base);
+            const extension = escapeHtml(nameParts.extension);
             
             html += `
                 <div style="display: flex; flex-direction: column; gap: 12px; padding: 20px 24px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 12px;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                         <div style="display: flex; align-items: center; gap: 16px;">
-                            <span class="badge" style="font-size: 0.6rem; padding: 4px 10px; opacity: 0.8;">${(src.name || "").split('.').pop().toUpperCase()}</span>
+                            <span class="badge" style="font-size: 0.6rem; padding: 4px 10px; opacity: 0.8;">${(src.name || '').split('.').pop().toUpperCase()}</span>
                             <div>
-                                <p style="font-weight: 800; font-size: 1rem; margin-bottom: 2px;">${src.name}</p>
+                                <p style="font-weight: 800; font-size: 1rem; margin-bottom: 2px;">${sourceName}</p>
                                 <p style="font-size: 0.75rem; color: var(--text-dim); font-weight: 600;">${formatFileSize(src.size)} • ${src.asset_count || 0} assets</p>
                             </div>
                         </div>
                         <div style="display: flex; gap: 8px;">
-                            ${authorTags.map(t => `<span class="badge" style="background: rgba(255,255,255,0.05); color: var(--text-dim); border: 1px solid var(--border-color); font-size: 0.65rem;">${t}</span>`).join('') || '<span class="badge" style="background: rgba(239, 68, 68, 0.05); color: #ef4444; border-color: rgba(239, 68, 68, 0.1); font-size: 0.65rem;">No Tags</span>'}
+                            ${authorTags.map(t => `<span class="badge" style="background: rgba(255,255,255,0.05); color: var(--text-dim); border: 1px solid var(--border-color); font-size: 0.65rem;">${escapeHtml(t)}</span>`).join('') || '<span class="badge" style="background: rgba(239, 68, 68, 0.05); color: #ef4444; border-color: rgba(239, 68, 68, 0.1); font-size: 0.65rem;">No Tags</span>'}
                         </div>
                     </div>
-                    <div style="background: rgba(0,0,0,0.2); padding: 10px 16px; border-radius: 8px; border-left: 3px solid var(--primary); display: flex; justify-content: space-between; align-items: center;">
-                        <div>
+                    <div style="background: rgba(0,0,0,0.2); padding: 10px 16px; border-radius: 8px; border-left: 3px solid var(--primary); display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 260px;">
                             <p style="font-size: 0.6rem; text-transform: uppercase; font-weight: 800; color: var(--text-dim); margin-bottom: 4px; letter-spacing: 0.05em;">Final Output Name</p>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span style="color: var(--primary); font-weight: 800; font-size: 0.8rem;">${out.name}</span>
-                            </div>
+                            ${isRenaming ? `
+                                <div style="display: flex; flex-direction: column; gap: 10px;">
+                                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                        <input
+                                            id="renameOutputInput"
+                                            type="text"
+                                            value="${renameDraft}"
+                                            oninput="window.setRenameDraftValue(this.value)"
+                                            onkeydown="window.handleRenameKeydown(event, ${idx})"
+                                            class="text-input"
+                                            ${isSaving ? 'disabled' : ''}
+                                            style="height: 44px; min-width: 240px; flex: 1; font-weight: 800;"
+                                        >
+                                        ${extension ? `<span style="padding: 0 14px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-muted); font-size: 0.75rem; font-weight: 800;">.${extension}</span>` : ''}
+                                    </div>
+                                    ${state.renameErrorMessage ? `<p style="font-size: 0.72rem; color: var(--error); font-weight: 700;">${escapeHtml(state.renameErrorMessage)}</p>` : ''}
+                                </div>
+                            ` : `
+                                <button
+                                    type="button"
+                                    onclick="window.startRenameOutput(${idx})"
+                                    style="background: transparent; border: none; padding: 0; color: var(--primary); font-weight: 800; font-size: 0.8rem; cursor: pointer; text-align: left;"
+                                >${outputName}</button>
+                            `}
                         </div>
-                        <button type="button" class="btn btn-secondary" onclick="renameOutputFile('${out.name}')" style="padding: 6px 12px; font-size: 0.75rem; display: flex; align-items: center; gap: 6px;">
-                            ✏️ Rename
-                        </button>
+                        ${isRenaming ? `
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button type="button" class="btn btn-secondary" onclick="window.cancelRenameOutput()" ${isSaving ? 'disabled' : ''} style="padding: 6px 12px; font-size: 0.75rem; display: flex; align-items: center; gap: 6px; opacity: ${isSaving ? '0.65' : '1'};">
+                                    Cancel
+                                </button>
+                                <button type="button" class="btn btn-primary" onclick="window.renameOutputFile(${idx})" ${isSaving ? 'disabled' : ''} style="padding: 6px 14px; font-size: 0.75rem; display: flex; align-items: center; gap: 6px; min-width: 102px;">
+                                    ${isSaving ? 'Saving...' : 'Save'}
+                                </button>
+                            </div>
+                        ` : `
+                            <button type="button" class="btn btn-secondary" onclick="window.startRenameOutput(${idx})" style="padding: 6px 12px; font-size: 0.75rem; display: flex; align-items: center; gap: 6px;">
+                                Rename
+                            </button>
+                        `}
                     </div>
                 </div>
             `;
         });
         
         sourceList.innerHTML = html;
-        document.getElementById('sourceCoverageInfo').innerText = "Ready to review and rename files manually";
+        document.getElementById('sourceCoverageInfo').innerText = 'Ready to review and rename files manually';
+
+        if (state.renamingOutputIndex !== null) {
+            requestAnimationFrame(() => {
+                const renameInput = document.getElementById('renameOutputInput');
+                if (!renameInput) return;
+
+                renameInput.focus();
+                renameInput.select();
+            });
+        }
     }
 
-    window.renameOutputFile = async function(oldName) {
-        const ext = oldName.split('.').pop();
-        const oldNameWithoutExt = oldName.replace('.' + ext, '');
-        let newName = prompt("Enter new filename (without extension):", oldNameWithoutExt);
-        
-        if (newName && newName.trim() !== '' && newName.trim() !== oldNameWithoutExt) {
-            newName = newName.trim() + '.' + ext;
+    window.setRenameDraftValue = function(value) {
+        state.renameDraftValue = value;
+    };
+
+    window.startRenameOutput = function(index) {
+        const output = state.outputs?.[index];
+        if (!output || state.renameSavingIndex !== null) return;
+
+        state.renamingOutputIndex = index;
+        state.renameDraftValue = getFilenameParts(output.name).base;
+        state.renameErrorMessage = '';
+        renderReedit();
+    };
+
+    window.cancelRenameOutput = function() {
+        if (state.renameSavingIndex !== null) return;
+
+        state.renamingOutputIndex = null;
+        state.renameDraftValue = '';
+        state.renameErrorMessage = '';
+        renderReedit();
+    };
+
+    window.handleRenameKeydown = function(event, index) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            window.renameOutputFile(index);
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            window.cancelRenameOutput();
+        }
+    };
+
+    window.renameOutputFile = async function(index) {
+        const output = state.outputs?.[index];
+        if (!output || state.renameSavingIndex !== null) return;
+
+        const parts = getFilenameParts(output.name);
+        const renameInput = document.getElementById('renameOutputInput');
+        const draftValue = (renameInput?.value ?? state.renameDraftValue ?? '').trim();
+
+        if (!draftValue) {
+            state.renameErrorMessage = 'Please enter a file name.';
+            renderReedit();
+            return;
+        }
+
+        if (/[\\\/]/.test(draftValue)) {
+            state.renameErrorMessage = 'File name cannot contain slashes.';
+            renderReedit();
+            return;
+        }
+
+        const newName = parts.extension ? `${draftValue}.${parts.extension}` : draftValue;
+        if (newName === output.name) {
+            window.cancelRenameOutput();
+            return;
+        }
+
+        const previousOutputs = state.outputs.map(item => ({ ...item }));
+        state.renameSavingIndex = index;
+        state.renameErrorMessage = '';
+        state.renameDraftValue = draftValue;
+        state.outputs = state.outputs.map((item, itemIndex) => itemIndex === index ? { ...item, name: newName } : item);
+        renderReedit();
+        if (state.status === 'completed') {
+            renderOutputs();
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('old_name', output.name);
+            formData.append('new_name', newName);
+            if (window.oauthToken) {
+                formData.append('drive_token', window.oauthToken);
+            }
             
-            try {
-                const formData = new FormData();
-                formData.append('old_name', oldName);
-                formData.append('new_name', newName);
-                
-                const response = await apiFetch(`/jobs/${state.jobId}/rename-output`, {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!response.ok) {
-                    throw new Error(await readErrorMessage(response, 'Rename failed'));
-                }
-                
-                const data = await response.json();
-                state.outputs = data.outputs;
-                state.bundle = data.bundle;
-                renderReedit();
-                if (state.status === 'completed') {
-                    renderOutputs();
-                }
-            } catch (err) {
-                alert('Failed to rename: ' + err.message);
+            const response = await apiFetch(`/jobs/${state.jobId}/rename-output`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                throw new Error(await readErrorMessage(response, 'Rename failed'));
+            }
+            
+            const data = await response.json();
+            state.outputs = data.outputs;
+            state.bundle = data.bundle;
+            state.driveStorage = data.drive_storage || state.driveStorage;
+            state.renamingOutputIndex = null;
+            state.renameSavingIndex = null;
+            state.renameDraftValue = '';
+            state.renameErrorMessage = '';
+            renderReedit();
+            if (state.status === 'completed') {
+                renderOutputs();
+            }
+        } catch (err) {
+            state.outputs = previousOutputs;
+            state.renameSavingIndex = null;
+            state.renamingOutputIndex = index;
+            state.renameDraftValue = draftValue;
+            state.renameErrorMessage = err instanceof Error ? err.message : 'Rename failed';
+            renderReedit();
+            if (state.status === 'completed') {
+                renderOutputs();
             }
         }
     };
@@ -1303,6 +1811,7 @@
         const outCont = document.getElementById('outputContainer');
         const resolvedApiBase = getResolvedApiBase();
         const archiveName = state.bundle?.name || (state.finalZipName || state.storeName ? `${state.finalZipName || state.storeName}.zip` : '');
+        const driveStatusText = getDriveStorageStatusText();
         const primaryDownloads = state.bundle ? [{
             name: state.bundle.name,
             size: state.bundle.size || 0,
@@ -1315,17 +1824,26 @@
             meta: `${formatFileSize(f.size)} • Click to download`
         }));
 
+        const driveInfoHtml = state.driveStorage ? `
+            <div style="margin-bottom: 24px; padding: 16px 20px; background: rgba(66,133,244,0.08); border: 1px solid rgba(66,133,244,0.22); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+                <div style="flex: 1;">
+                    <p style="font-size: 0.6rem; font-weight: 800; color: #8ab4f8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px;">Google Drive Storage</p>
+                    <p style="font-size: 0.82rem; color: var(--text-main); margin: 0;">${driveStatusText || 'Drive storage is available for this job.'}</p>
+                </div>
+                ${state.driveStorage.job_folder_url ? `<a href="${state.driveStorage.job_folder_url}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="white-space: nowrap;">Open Drive Folder</a>` : ''}
+            </div>` : '';
+
         // Show configured filename info
         const infoHtml = archiveName ? `
             <div style="margin-bottom: 24px; padding: 16px 20px; background: rgba(249,115,22,0.06); border: 1px solid rgba(249,115,22,0.2); border-radius: 12px; display: flex; align-items: center; gap: 12px;">
-                <span style="font-size: 1.4rem;">📦</span>
+                <span style="font-size: 1.4rem;"><i class="fa-solid fa-box"></i></span>
                 <div style="flex: 1;">
                     <p style="font-size: 0.6rem; font-weight: 800; color: var(--primary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px;">Output Archive Name</p>
                     <input id="finalDownloadNameIn" type="text" value="${archiveName}" class="text-input" style="background: rgba(0,0,0,0.3); height: 42px; font-weight: 800; width: 100%; border: 1px solid rgba(255,255,255,0.1); margin-top: 8px;">
                 </div>
             </div>` : '';
 
-        outCont.innerHTML = infoHtml + `
+        outCont.innerHTML = driveInfoHtml + infoHtml + `
             <div class="file-grid" style="max-width: 600px; margin: 0 auto;">
                 ${primaryDownloads.map(file => { const f = file; return `
                     <a href="${file.href}" class="file-item" style="text-decoration: none;">
@@ -1372,7 +1890,13 @@
 
     async function handleUpload() {
         if (state.files.length === 0) return;
+        stopStageActivity();
+        state.progressMeta = null;
+        state.lastBackendProgressAt = 0;
+        state.uploadedFileCount = state.files.length;
+        state.uploadedFileNames = state.files.map(file => file.name);
         state.status = 'uploading';
+        setProgressDisplay(1);
         updateView();
 
         try {
@@ -1386,9 +1910,12 @@
 
             const data = await response.json();
             state.jobId = data.job_id;
+            state.driveStorage = data.drive_storage || state.driveStorage;
+            state.progressMeta = data.progress_meta || null;
             state.status = 'uploaded';
             updateView();
         } catch (error) {
+            stopStageActivity();
             state.status = 'error';
             elements.errorMessage.innerText = error instanceof Error ? error.message : 'Upload request failed';
             updateView();
@@ -1401,7 +1928,13 @@
         const url = document.getElementById('linkUploadInput').value.trim();
         if (!url) return alert('Please enter a secure file link (Google Drive or direct URL)');
 
+        stopStageActivity();
+        state.progressMeta = null;
+        state.lastBackendProgressAt = 0;
+        state.uploadedFileCount = 1;
+        state.uploadedFileNames = ['Remote file'];
         state.status = 'uploading';
+        setProgressDisplay(1);
         updateView();
         
         // Show cloud fetch specific messaging
@@ -1409,11 +1942,14 @@
         if (elements.stageMessage) elements.stageMessage.innerText = "Requesting remote node to secure the asset. This may take a moment depending on file size.";
 
         try {
-            pollStatus();
             const response = await apiFetch('/upload-url', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
+                body: JSON.stringify({
+                    url,
+                    token: window.oauthToken || '',
+                    drive_token: window.oauthToken || ''
+                })
             });
 
             if (!response.ok) {
@@ -1426,10 +1962,13 @@
 
             const data = await response.json();
             state.jobId = data.job_id;
+            state.driveStorage = data.drive_storage || state.driveStorage;
+            state.progressMeta = data.progress_meta || null;
             state.status = 'uploaded';
             updateView();
         } catch (error) {
             clearInterval(pollInterval);
+            stopStageActivity();
             state.status = 'error';
             elements.errorMessage.innerText = error instanceof Error ? error.message : 'Cloud fetch request failed';
             updateView();
@@ -1440,8 +1979,20 @@
     if (linkUploadBtn) linkUploadBtn.onclick = handleLinkUpload;
 
     async function handleScan() {
+        stopStageActivity();
+        state.progressMeta = {
+            phase: 'scan',
+            total_files: state.uploadedFileCount || state.files.length || 1,
+            current_file_index: 1,
+            current_file_name: state.uploadedFileNames[0] || 'Package',
+            assets_found: 0,
+            detected_authors: 0,
+            elapsed_seconds: 0
+        };
         state.status = 'scanning';
+        setProgressDisplay(3);
         updateView();
+        startStageActivity('scanning');
         try {
             const formData = new FormData();
             formData.append('blocked_keywords', '[]');
@@ -1451,7 +2002,27 @@
                 clearInterval(pollInterval);
                 throw new Error(await readErrorMessage(resp, "Branding scan failed to start"));
             }
+
+            const data = await resp.json();
+            clearInterval(pollInterval);
+            stopStageActivity();
+            state.lastBackendProgressAt = Date.now();
+            state.progressMeta = data.progress_meta || null;
+
+            if (data.status === 'scanned') {
+                setProgressDisplay(100);
+                state.status = 'scanned';
+                state.manifest = data.manifest;
+                state.driveStorage = data.drive_storage || state.driveStorage;
+                updateView();
+
+                if (document.getElementById('globalAutoProcess')?.checked) {
+                    setTimeout(() => handleRebrand(), 500);
+                }
+            }
         } catch (e) {
+            clearInterval(pollInterval);
+            stopStageActivity();
             state.status = 'error';
             elements.errorMessage.innerText = e.message;
             updateView();
@@ -1482,8 +2053,19 @@
             }
         }
 
+        stopStageActivity();
+        state.progressMeta = {
+            phase: 'rebrand',
+            total_files: state.manifest?.source_files?.length || state.uploadedFileCount || 1,
+            current_file_index: 1,
+            current_file_name: state.manifest?.source_files?.[0]?.name || state.uploadedFileNames[0] || 'Package',
+            elapsed_seconds: 0,
+            action: 'Rebrand + Zip'
+        };
         state.status = 'processing';
+        setProgressDisplay(8);
         updateView();
+        startStageActivity('processing');
         
         try {
             const formData = new FormData();
@@ -1497,6 +2079,9 @@
             if (picInput.files && picInput.files.length > 0) {
                 formData.append('author_pic_file', picInput.files[0]);
             }
+            if (window.oauthToken) {
+                formData.append('drive_token', window.oauthToken);
+            }
 
             pollStatus();
             const resp = await apiFetch(`/jobs/${state.jobId}/rebrand`, { method: 'POST', body: formData });
@@ -1504,7 +2089,36 @@
                 clearInterval(pollInterval);
                 throw new Error(await readErrorMessage(resp, "Repackaging process failed"));
             }
+
+            const data = await resp.json();
+            clearInterval(pollInterval);
+            stopStageActivity();
+            state.lastBackendProgressAt = Date.now();
+            state.progressMeta = data.progress_meta || null;
+
+            if (data.status === 'completed') {
+                setProgressDisplay(100);
+                const isAuto = document.getElementById('globalAutoProcess')?.checked || document.getElementById('autoProcessCheckbox')?.checked;
+                state.status = isAuto ? 'completed' : 'reedit';
+                state.outputs = data.outputs;
+                state.bundle = data.bundle;
+                state.storeName = data.store_name || state.storeName || '';
+                state.finalZipName = data.final_zip_name || state.finalZipName || (data.bundle?.name ? data.bundle.name.replace(/\.zip$/i, '') : '');
+                state.driveStorage = data.drive_storage || state.driveStorage;
+                updateView();
+
+                if (isAuto) {
+                    setTimeout(() => {
+                        const dlBtn = document.getElementById('downloadAllBtn');
+                        if (dlBtn && dlBtn.href) {
+                            window.location.href = dlBtn.href;
+                        }
+                    }, 1000);
+                }
+            }
         } catch (e) {
+            clearInterval(pollInterval);
+            stopStageActivity();
             state.status = 'error';
             elements.errorMessage.innerText = e.message;
             updateView();
@@ -1516,6 +2130,10 @@
     let pollInterval;
     let pollFailCount = 0;
     function pollStatus() {
+        if (!state.jobId) {
+            return;
+        }
+
         clearInterval(pollInterval);
         pollFailCount = 0;
         pollInterval = setInterval(async () => {
@@ -1523,40 +2141,57 @@
                 const resp = await apiFetch(`/jobs/${state.jobId}`);
                 if (!resp.ok) throw new Error(await readErrorMessage(resp, "Connection lost"));
                 const data = await resp.json();
-                
-                elements.progressPercent.innerText = (data.progress || 0) + "%";
-                elements.progressFill.style.width = (data.progress || 0) + "%";
+                state.lastBackendProgressAt = Date.now();
+                state.progressMeta = data.progress_meta || state.progressMeta;
+                setProgressDisplay(data.progress || 0);
                 if (data.progress_message) elements.stageMessage.innerText = data.progress_message;
+
+                if (state.status === 'scanning') {
+                    updateScanningStats(state.progressMeta);
+                } else if (state.status === 'processing') {
+                    updateProcessingStats(state.progressMeta);
+                }
 
                 if (data.status === 'scanned') {
                     clearInterval(pollInterval);
-                    state.status = 'scanned';
-                    state.manifest = data.manifest;
-                    updateView();
-                    
-                    if (document.getElementById('globalAutoProcess')?.checked) {
-                        setTimeout(() => handleRebrand(), 500);
+                    stopStageActivity();
+                    if (state.status !== 'scanned') {
+                        setProgressDisplay(100);
+                        state.status = 'scanned';
+                        state.manifest = data.manifest;
+                        state.driveStorage = data.drive_storage || state.driveStorage;
+                        updateView();
+                        
+                        if (document.getElementById('globalAutoProcess')?.checked) {
+                            setTimeout(() => handleRebrand(), 500);
+                        }
                     }
                 } else if (data.status === 'completed') {
                     clearInterval(pollInterval);
-                    const isAuto = document.getElementById('globalAutoProcess')?.checked || document.getElementById('autoProcessCheckbox')?.checked;
-                    state.status = isAuto ? 'completed' : 'reedit';
-                    state.outputs = data.outputs;
-                    state.bundle = data.bundle;
-                    state.storeName = data.store_name || state.storeName || '';
-                    state.finalZipName = data.final_zip_name || state.finalZipName || (data.bundle?.name ? data.bundle.name.replace(/\.zip$/i, '') : '');
-                    updateView();
+                    stopStageActivity();
+                    if (!['completed', 'reedit'].includes(state.status)) {
+                        setProgressDisplay(100);
+                        const isAuto = document.getElementById('globalAutoProcess')?.checked || document.getElementById('autoProcessCheckbox')?.checked;
+                        state.status = isAuto ? 'completed' : 'reedit';
+                        state.outputs = data.outputs;
+                        state.bundle = data.bundle;
+                        state.storeName = data.store_name || state.storeName || '';
+                        state.finalZipName = data.final_zip_name || state.finalZipName || (data.bundle?.name ? data.bundle.name.replace(/\.zip$/i, '') : '');
+                        state.driveStorage = data.drive_storage || state.driveStorage;
+                        updateView();
 
-                    if (isAuto) {
-                        setTimeout(() => {
-                            const dlBtn = document.getElementById('downloadAllBtn');
-                            if (dlBtn && dlBtn.href) {
-                                window.location.href = dlBtn.href;
-                            }
-                        }, 1000);
+                        if (isAuto) {
+                            setTimeout(() => {
+                                const dlBtn = document.getElementById('downloadAllBtn');
+                                if (dlBtn && dlBtn.href) {
+                                    window.location.href = dlBtn.href;
+                                }
+                            }, 1000);
+                        }
                     }
                 } else if (data.status === 'failed') {
                     clearInterval(pollInterval);
+                    stopStageActivity();
                     state.status = 'error';
                     elements.errorMessage.innerText = data.error || "Processing failed.";
                     updateView();
@@ -1566,6 +2201,7 @@
                 pollFailCount = (pollFailCount || 0) + 1;
                 if (pollFailCount >= 3) {
                     clearInterval(pollInterval);
+                    stopStageActivity();
                     state.status = 'error';
                     elements.errorMessage.innerText = e.message || 'Lost connection to the backend. Please check the server and try again.';
                     updateView();
@@ -1579,7 +2215,28 @@
             // Silently trigger cleanup in the background
             apiFetch(`/jobs/${state.jobId}/cleanup`, { method: 'POST' }).catch(console.error);
         }
-        state = { files: [], jobId: null, status: 'idle', manifest: null, outputs: [], bundle: null, storeName: '', finalZipName: '' };
+        clearInterval(pollInterval);
+        stopStageActivity();
+        state = {
+            files: [],
+            jobId: null,
+            status: 'idle',
+            manifest: null,
+            outputs: [],
+            bundle: null,
+            storeName: '',
+            finalZipName: '',
+            driveStorage: null,
+            progressValue: 0,
+            progressMeta: null,
+            uploadedFileCount: 0,
+            uploadedFileNames: [],
+            lastBackendProgressAt: 0,
+            renamingOutputIndex: null,
+            renameDraftValue: '',
+            renameSavingIndex: null,
+            renameErrorMessage: ''
+        };
         
         // Clear input fields
         if (document.getElementById('authorNameIn')) document.getElementById('authorNameIn').value = '';
@@ -1597,82 +2254,137 @@
 
     // --- Storage Management Logic ---
     async function refreshStorageStats() {
+        if (storageStatsInFlight) {
+            return;
+        }
+
+        if (document.hidden) {
+            scheduleStorageStatsRefresh(30000);
+            return;
+        }
+
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            const offlineNote = document.getElementById('storageUsageNote');
+            if (offlineNote) offlineNote.innerText = 'Storage stats paused while offline.';
+            scheduleStorageStatsRefresh(45000);
+            return;
+        }
+
+        storageStatsInFlight = true;
         try {
             const resp = await apiFetch('/storage/stats');
-            if (resp.ok) {
-                const data = await resp.json();
-                const usedGB = (data.used_bytes / (1024 * 1024 * 1024)).toFixed(2);
-                const totalGB = (data.total_mb / 1024).toFixed(0);
-                
-                const label = document.getElementById('storageUsageLabel');
-                const bar = document.getElementById('storageBarFill');
-                
-                if (label) label.innerText = `${usedGB} GB / ${totalGB} GB (${data.percent}%)`;
-                if (bar) {
-                    bar.style.width = data.percent + "%";
-                    bar.classList.remove('storage-status-normal', 'storage-status-warning', 'storage-status-full');
-                    if (data.status === 'full') bar.classList.add('storage-status-full');
-                    else if (data.status === 'warning') bar.classList.add('storage-status-warning');
-                    else bar.classList.add('storage-status-normal');
+            let data = { used_bytes: 0, total_mb: 2097152, percent: 0, status: 'normal' };
+            if (resp.ok) data = await resp.json();
+            storageStatsFailCount = 0;
+
+            let usedBytes = data.used_bytes;
+            let totalMB = data.total_mb;
+            let labelPrefix = data.provider === 'google_drive' ? 'GOOGLE DRIVE' : 'ENGINE STORAGE';
+
+            // In user-managed mode, switch the card to the signed-in Drive quota once OAuth is active
+            if (!OWNER_MANAGED_DRIVE && window.oauthToken) {
+                try {
+                    const gResp = await fetch(`https://www.googleapis.com/drive/v3/about?fields=storageQuota&access_token=${window.oauthToken}`);
+                    if (gResp.ok) {
+                        const gData = await gResp.json();
+                        if (gData.storageQuota) {
+                            usedBytes = parseInt(gData.storageQuota.usage);
+                            totalMB = parseInt(gData.storageQuota.limit) / (1024 * 1024);
+                            labelPrefix = "GOOGLE DRIVE";
+                        }
+                    }
+                } catch (err) {
+                    console.error("GDrive Quota Fetch Error:", err);
                 }
             }
+
+            const usedGB = usedBytes / (1024 * 1024 * 1024);
+            const totalGB = totalMB / 1024;
+            
+            let usedStr = usedGB >= 1024 ? (usedGB / 1024).toFixed(2) + " TB" : usedGB.toFixed(2) + " GB";
+            let totalStr = totalGB >= 1024 ? (totalGB / 1024).toFixed(0) + " TB" : totalGB.toFixed(0) + " GB";
+            
+            const percent = ((usedBytes / (totalMB * 1024 * 1024)) * 100).toFixed(1);
+            
+            const label = document.getElementById('storageUsageLabel');
+            const bar = document.getElementById('storageBarFill');
+            const contextLabel = document.querySelector('.storage-label-text');
+            const note = document.getElementById('storageUsageNote');
+            const rootLink = document.getElementById('storageRootFolderLink');
+
+            if (data.status === 'error') {
+                if (contextLabel) contextLabel.innerText = "GOOGLE DRIVE USAGE";
+                if (label) label.innerText = "Unavailable";
+                if (note) note.innerText = data.error || 'Google Drive quota could not be loaded.';
+                if (rootLink) rootLink.style.display = 'none';
+                if (bar) {
+                    bar.style.width = "100%";
+                    bar.classList.remove('storage-status-normal', 'storage-status-warning');
+                    bar.classList.add('storage-status-full');
+                }
+                return;
+            }
+            
+            if (contextLabel) contextLabel.innerText = labelPrefix + " USAGE";
+            if (label) label.innerText = `${usedStr} / ${totalStr} (${percent}%)`;
+            if (note) note.innerText = `Remaining: ${formatStorageAmount(data.remaining_bytes || Math.max(0, (totalMB * 1024 * 1024) - usedBytes))}`;
+            if (rootLink) {
+                if (data.root_folder_url) {
+                    rootLink.href = data.root_folder_url;
+                    rootLink.style.display = 'inline-flex';
+                } else {
+                    rootLink.style.display = 'none';
+                }
+            }
+            
+            if (bar) {
+                bar.style.width = percent + "%";
+                bar.classList.remove('storage-status-normal', 'storage-status-warning', 'storage-status-full');
+                if (percent >= 95) bar.classList.add('storage-status-full');
+                else if (percent >= 80) bar.classList.add('storage-status-warning');
+                else bar.classList.add('storage-status-normal');
+            }
         } catch (e) {
-            console.error("Storage polling failed", e);
+            storageStatsFailCount += 1;
+            const note = document.getElementById('storageUsageNote');
+            if (note) {
+                note.innerText = storageStatsFailCount >= 3
+                    ? 'Storage stats temporarily unavailable. Retrying quietly in the background.'
+                    : 'Refreshing storage usage...';
+            }
+        } finally {
+            storageStatsInFlight = false;
+            const nextDelay = storageStatsFailCount === 0
+                ? 30000
+                : Math.min(120000, 30000 + (storageStatsFailCount * 15000));
+            scheduleStorageStatsRefresh(nextDelay);
         }
     }
 
-    if (elements.cleanupBtn) {
-        elements.cleanupBtn.onclick = async () => {
-            if (!confirm("Are you sure you want to clear all working memory? This will delete all uploaded and processed files.")) return;
-            
-            elements.cleanupBtn.disabled = true;
-            elements.cleanupBtn.innerHTML = "🧹 CLEARING...";
-            
-            if (elements.cleanupProgressWrap) elements.cleanupProgressWrap.style.display = 'block';
-            if (elements.cleanupFeedback) elements.cleanupFeedback.innerText = "Cleaning system memory...";
-            
-            // Reset state & front-end UI immediately
-            state = { files: [], jobId: null, status: 'idle', manifest: null, outputs: [], bundle: null, storeName: '', finalZipName: '' };
-            
-            // Clear input fields
-            const inputs = ['authorNameIn', 'storeNameIn', 'sigInput', 'sigFileName', 'picInput', 'picFileName', 'linkUploadInput'];
-            inputs.forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.value = '';
-            });
-            ['clearSig', 'clearPic'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.style.display = 'none';
-            });
-            
-            updateView();
+    function scheduleStorageStatsRefresh(delay = 30000) {
+        if (storageStatsTimer) {
+            clearTimeout(storageStatsTimer);
+        }
 
-            try {
-                const resp = await apiFetch(`/maintenance/cleanup-storage`, { method: 'POST' });
-                if (!resp.ok) throw new Error(await readErrorMessage(resp, "Cleanup failed"));
-                
-                if (elements.cleanupProgressFill) elements.cleanupProgressFill.style.width = "100%";
-                if (elements.cleanupFeedback) elements.cleanupFeedback.innerText = "Memory cleared successfully.";
-                
-                refreshStorageStats();
-            } catch (e) {
-                if (elements.cleanupFeedback) elements.cleanupFeedback.innerText = e.message || "Error during cleanup.";
-            } finally {
-                elements.cleanupBtn.disabled = false;
-                elements.cleanupBtn.innerHTML = '<span style="font-size: 1.1rem; vertical-align: middle; margin-right: 4px;">🧹</span> CLEAR MEMORY';
-                
-                setTimeout(() => {
-                    if (elements.cleanupProgressWrap) elements.cleanupProgressWrap.style.display = 'none';
-                    if (elements.cleanupProgressFill) elements.cleanupProgressFill.style.width = "0%";
-                }, 3000);
-            }
-        };
+        storageStatsTimer = window.setTimeout(() => {
+            refreshStorageStats();
+        }, delay);
     }
 
-    // Start Polling
-    setInterval(refreshStorageStats, 20000);
+    window.addEventListener('online', () => {
+        storageStatsFailCount = 0;
+        refreshStorageStats();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            refreshStorageStats();
+        }
+    });
+
     refreshStorageStats(); 
 
     updateView();
 </script>
 @endpush
+

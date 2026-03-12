@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\StudioJobCleanupService;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -9,6 +10,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 // use App\Models\StudioJob; // Removed to use file-based storage
 use Symfony\Component\Process\Process;
@@ -17,10 +19,14 @@ use ZipArchive;
 class StudioController extends Controller
 {
     private $storagePath;
-    private $limitMB = 20480; // 20GB Working Limit
+    private $limitMB = 2097152; // 2TB Working Limit
+    private $ownerDriveAccessToken = null;
+    private $ownerDriveAccessTokenExpiresAt = null;
+    private StudioJobCleanupService $jobCleanup;
 
-    public function __construct()
+    public function __construct(StudioJobCleanupService $jobCleanup)
     {
+        $this->jobCleanup = $jobCleanup;
         $this->storagePath = storage_path('app/tasks');
         if (!file_exists($this->storagePath)) {
             mkdir($this->storagePath, 0755, true);
@@ -44,6 +50,9 @@ class StudioController extends Controller
     private function checkStorageLimit()
     {
         Log::info("Storage Limit Check starting...");
+
+        $this->maybePurgeExpiredJobs();
+
         try {
             $used = $this->getUsedStorageBytes();
             $limit = $this->limitMB * 1024 * 1024;
@@ -58,6 +67,50 @@ class StudioController extends Controller
     public function getStorageStats()
     {
         Log::info("GetStorageStats requested");
+        $canViewDriveRoot = (bool) Auth::user()?->is_admin;
+
+        if ($this->hasOwnerManagedGoogleDriveStorage()) {
+            try {
+                $stats = Cache::remember('google_drive_owner_storage_stats', now()->addSeconds(30), function () {
+                    $token = $this->getOwnerManagedGoogleDriveAccessToken();
+                    $quota = $this->fetchGoogleDriveStorageQuota($token);
+                    $rootFolder = $this->ensureGoogleDriveRootFolder($token);
+
+                    return [
+                        'provider' => 'google_drive',
+                        'total_mb' => (int) round($quota['limit_bytes'] / 1024 / 1024),
+                        'used_bytes' => $quota['used_bytes'],
+                        'remaining_bytes' => $quota['remaining_bytes'],
+                        'percent' => round($quota['percent'], 2),
+                        'status' => $quota['status'],
+                        'root_folder_id' => $rootFolder['root_folder_id'],
+                        'root_folder_name' => $rootFolder['root_folder_name'],
+                        'root_folder_url' => $rootFolder['root_folder_url'],
+                    ];
+                });
+
+                if (!$canViewDriveRoot) {
+                    $stats['root_folder_id'] = null;
+                    $stats['root_folder_name'] = null;
+                    $stats['root_folder_url'] = null;
+                }
+
+                return response()->json($stats);
+            } catch (\Throwable $e) {
+                Log::warning('Owner Google Drive quota lookup failed: ' . $e->getMessage());
+
+                return response()->json([
+                    'provider' => 'google_drive',
+                    'total_mb' => 0,
+                    'used_bytes' => 0,
+                    'remaining_bytes' => 0,
+                    'percent' => 0,
+                    'status' => 'error',
+                    'error' => $this->normalizeGoogleDriveQuotaError($e->getMessage()),
+                ]);
+            }
+        }
+
         $usedBytes = $this->getUsedStorageBytes();
         $limitBytes = $this->limitMB * 1024 * 1024;
         $remainingBytes = max(0, $limitBytes - $usedBytes);
@@ -68,6 +121,7 @@ class StudioController extends Controller
         elseif ($percent >= 80) $status = 'warning';
 
         return response()->json([
+            'provider' => 'local',
             'total_mb' => $this->limitMB,
             'used_bytes' => $usedBytes,
             'remaining_bytes' => $remainingBytes,
@@ -82,7 +136,7 @@ class StudioController extends Controller
     public function upload(Request $request)
     {
         if (!$this->checkStorageLimit()) {
-            return response()->json(['error' => 'Storage is full. Please click Clear Memory before starting a new task.'], 403);
+            return response()->json(['error' => 'Storage is full. Please contact support or wait for automatic cleanup.'], 403);
         }
 
         $jobId = (string) Str::uuid();
@@ -110,19 +164,35 @@ class StudioController extends Controller
             ];
         }
 
+        $driveStorage = [];
+        $driveToken = $this->resolveGoogleDriveAccessToken($request->input('drive_token'));
+        if ($driveToken !== '') {
+            try {
+                $driveSync = $this->syncManagedFilesToGoogleDrive($jobId, $savedFiles, $driveToken);
+                $savedFiles = $driveSync['files'];
+                $driveStorage = $driveSync['drive_storage'];
+                $driveStorage['inputs_synced'] = count($savedFiles);
+            } catch (\Throwable $e) {
+                Log::warning("Initial Drive sync failed for job {$jobId}: " . $e->getMessage());
+                $driveStorage = $this->buildDriveStorageErrorState([], $e->getMessage());
+            }
+        }
+
         $this->updateJob($jobId, [
             'job_id' => $jobId,
             'user_id' => Auth::id(),
             'status' => 'uploaded',
             'files' => $savedFiles,
-            'progress' => 0
+            'progress' => 0,
+            'drive_storage' => $driveStorage,
         ]);
 
         $this->purgeOldJobs();
 
         return response()->json([
             'job_id' => $jobId,
-            'status' => 'uploaded'
+            'status' => 'uploaded',
+            'drive_storage' => $driveStorage,
         ]);
     }
 
@@ -130,7 +200,7 @@ class StudioController extends Controller
     {
         Log::info("UploadChunk Start: " . $request->input('file_name') . " (Chunk " . $request->input('chunk_index') . ")");
         if (!$this->checkStorageLimit()) {
-            return response()->json(['error' => 'Storage is full. Please click Clear Memory before starting a new task.'], 403);
+            return response()->json(['error' => 'Storage is full. Please contact support or wait for automatic cleanup.'], 403);
         }
 
         $jobId = $request->input('job_id');
@@ -184,12 +254,27 @@ class StudioController extends Controller
             ];
         }
 
+        $driveStorage = [];
+        $driveToken = $this->resolveGoogleDriveAccessToken($request->input('drive_token'));
+        if ($driveToken !== '') {
+            try {
+                $driveSync = $this->syncManagedFilesToGoogleDrive($jobId, $savedFiles, $driveToken);
+                $savedFiles = $driveSync['files'];
+                $driveStorage = $driveSync['drive_storage'];
+                $driveStorage['inputs_synced'] = count($savedFiles);
+            } catch (\Throwable $e) {
+                Log::warning("Finalize upload Drive sync failed for job {$jobId}: " . $e->getMessage());
+                $driveStorage = $this->buildDriveStorageErrorState([], $e->getMessage());
+            }
+        }
+
         $this->updateJob($jobId, [
             'job_id' => $jobId,
             'user_id' => Auth::id(),
             'status' => 'uploaded',
             'files' => $savedFiles,
-            'progress' => 0
+            'progress' => 0,
+            'drive_storage' => $driveStorage,
         ]);
 
         $this->purgeOldJobs();
@@ -206,24 +291,22 @@ class StudioController extends Controller
             ]);
         } catch (\Exception $e) {}
 
-        return response()->json(['status' => 'uploaded', 'job_id' => $jobId]);
+        return response()->json([
+            'status' => 'uploaded',
+            'job_id' => $jobId,
+            'drive_storage' => $driveStorage,
+        ]);
     }
 
     /**
-     * Purge jobs older than 1 hour
+     * Purge expired jobs based on the configured retention window.
      */
-    private function purgeOldJobs()
+    private function purgeOldJobs(): void
     {
-        $folders = File::directories($this->storagePath);
-        $oneHourAgo = time() - 3600;
-
-        foreach ($folders as $folder) {
-            if (filemtime($folder) < $oneHourAgo) {
-                File::deleteDirectory($folder);
-                // No need to delete from DB anymore, file is in the folder being deleted
-                // $jobId = basename($folder);
-                // StudioJob::where('job_id', $jobId)->delete();
-            }
+        try {
+            $this->jobCleanup->purgeExpiredJobs();
+        } catch (\Throwable $e) {
+            Log::warning('Expired studio job purge failed: ' . $e->getMessage());
         }
     }
 
@@ -437,6 +520,7 @@ class StudioController extends Controller
     {
         $job = $this->getJob($jobId);
         if (!$job) return response()->json(['error' => 'Job not found'], 404);
+        $scanStartedAt = microtime(true);
 
         $extractRoot = $this->storagePath . '/' . $jobId . '/work';
         Log::info("Scan starting. Extraction root: {$extractRoot}");
@@ -460,12 +544,23 @@ class StudioController extends Controller
 
         $sourceFiles = $job->files ?: [];
         $totalFiles = count($sourceFiles);
+        $safeTotalFiles = max($totalFiles, 1);
 
         foreach ($sourceFiles as $index => $source) {
             $currentProgress = 5 + (int)(($index / ($totalFiles ?: 1)) * 90);
             $this->updateJob($jobId, [
                 'progress' => $currentProgress,
-                'progress_message' => "Scanning " . ($index + 1) . "/$totalFiles: " . $source['name']
+                'progress_message' => "Scanning " . ($index + 1) . "/$totalFiles: " . $source['name'],
+                'progress_meta' => [
+                    'phase' => 'scan',
+                    'total_files' => $safeTotalFiles,
+                    'completed_files' => $index,
+                    'current_file_index' => $index + 1,
+                    'current_file_name' => $source['name'],
+                    'assets_found' => count($manifest['assets']),
+                    'detected_authors' => count($this->uniqueValues($allAuthorTags)),
+                    'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
+                ],
             ]);
 
             $subDir = $extractRoot . '/' . pathinfo($source['name'], PATHINFO_FILENAME);
@@ -512,7 +607,19 @@ class StudioController extends Controller
                 $newProgress = 5 + (int)(($index / ($totalFiles ?: 1)) * 90 + $subProgress);
                 
                 if ($newProgress > $lastReportedProgress) {
-                    $this->updateJob($jobId, ['progress' => min(95, $newProgress)]);
+                    $this->updateJob($jobId, [
+                        'progress' => min(95, $newProgress),
+                        'progress_meta' => [
+                            'phase' => 'scan',
+                            'total_files' => $safeTotalFiles,
+                            'completed_files' => $index,
+                            'current_file_index' => $index + 1,
+                            'current_file_name' => $source['name'],
+                            'assets_found' => count($manifest['assets']) + $assetCount,
+                            'detected_authors' => count($this->uniqueValues(array_merge($allAuthorTags, $authorsInFile))),
+                            'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
+                        ],
+                    ]);
                     $lastReportedProgress = $newProgress;
                 }
                 $counter++;
@@ -575,10 +682,34 @@ class StudioController extends Controller
         $this->updateJob($jobId, [
             'status' => 'scanned',
             'manifest' => $manifest,
-            'progress' => 100
+            'progress' => 100,
+            'progress_message' => 'Scan complete. Review detected assets before rebrand.',
+            'progress_meta' => [
+                'phase' => 'scan',
+                'total_files' => $safeTotalFiles,
+                'completed_files' => $safeTotalFiles,
+                'current_file_index' => $safeTotalFiles,
+                'current_file_name' => $sourceFiles[$totalFiles - 1]['name'] ?? 'Package',
+                'assets_found' => count($manifest['assets']),
+                'detected_authors' => count($manifest['detected_authors']),
+                'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
+            ],
         ]);
 
-        return response()->json(['status' => 'scanned', 'manifest' => $manifest]);
+        return response()->json([
+            'status' => 'scanned',
+            'manifest' => $manifest,
+            'progress_meta' => [
+                'phase' => 'scan',
+                'total_files' => $safeTotalFiles,
+                'completed_files' => $safeTotalFiles,
+                'current_file_index' => $safeTotalFiles,
+                'current_file_name' => $sourceFiles[$totalFiles - 1]['name'] ?? 'Package',
+                'assets_found' => count($manifest['assets']),
+                'detected_authors' => count($manifest['detected_authors']),
+                'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
+            ],
+        ]);
     }
 
     /**
@@ -587,21 +718,33 @@ class StudioController extends Controller
     public function previewAsset(Request $request, $jobId)
     {
         $path = $request->query('path');
-        Log::info("Preview request for job {$jobId}, path: {$path}");
-        
+
         if (!$path) return response()->json(['error' => 'No path provided'], 400);
 
         $fullPath = $this->resolveJobAssetPath($jobId, $path);
-        Log::info("Resolved path: " . ($fullPath ?: 'NULL'));
-        
+
         if (!$fullPath) {
             Log::warning("Preview failed: File not found for job {$jobId} path {$path}");
             return response()->json(['error' => 'File not found'], 404);
         }
 
+        $lastModifiedTs = @filemtime($fullPath) ?: time();
+        $lastModified = gmdate('D, d M Y H:i:s', $lastModifiedTs) . ' GMT';
+        $etag = '"' . sha1($fullPath . '|' . $lastModifiedTs . '|' . (@filesize($fullPath) ?: 0)) . '"';
+
+        if ($request->header('If-None-Match') === $etag) {
+            return response('', 304, [
+                'Cache-Control' => 'private, max-age=600',
+                'ETag' => $etag,
+                'Last-Modified' => $lastModified,
+            ]);
+        }
+
         $headers = [
             'Content-Type' => File::mimeType($fullPath) ?: 'application/octet-stream',
-            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+            'Cache-Control' => 'private, max-age=600',
+            'ETag' => $etag,
+            'Last-Modified' => $lastModified,
         ];
 
         return response()->file($fullPath, $headers);
@@ -672,11 +815,21 @@ class StudioController extends Controller
         if (!$job) {
             return response()->json(['error' => 'Job not found'], 404);
         }
+        $rebrandStartedAt = microtime(true);
 
         $this->updateJob($jobId, [
             'status' => 'processing',
             'progress' => 2,
-            'progress_message' => 'Preparing rebranding engine...'
+            'progress_message' => 'Preparing rebranding engine...',
+            'progress_meta' => [
+                'phase' => 'rebrand',
+                'total_files' => max(count($job->files ?: []), 1),
+                'completed_files' => 0,
+                'current_file_index' => 1,
+                'current_file_name' => $job->files[0]['name'] ?? 'Package',
+                'elapsed_seconds' => 0,
+                'action' => 'Preparing assets',
+            ],
         ]);
 
         $userDir = $this->storagePath . '/users/' . Auth::id();
@@ -721,6 +874,8 @@ class StudioController extends Controller
         $storeName = $storeNameInput ?: 'My Store';
         $authorName = $authorNameInput ?: $storeName;
         $finalZipName = $finalZipNameInput ?: $storeName;
+        $driveToken = $this->resolveGoogleDriveAccessToken($request->input('drive_token'));
+        $driveStorage = is_array($job->drive_storage ?? null) ? $job->drive_storage : [];
         
         $authorReplacements = $this->buildAuthorReplacementMap(
             $job->manifest['rename_candidates'] ?? ($job->manifest['detected_authors'] ?? []),
@@ -760,13 +915,23 @@ class StudioController extends Controller
 
         $rebrandedFiles = [];
         $total = count($job->files ?: []);
+        $safeTotal = max($total, 1);
         
         foreach ($job->files as $index => $source) {
             Log::info("Rebranding file " . ($index+1) . " of $total: " . $source['name']);
             $currentProgress = 5 + (int)(($index / ($total ?: 1)) * 85);
             $this->updateJob($jobId, [
                 'progress' => $currentProgress,
-                'progress_message' => "Rebranding " . ($index+1) . "/$total: " . $source['name']
+                'progress_message' => "Rebranding " . ($index+1) . "/$total: " . $source['name'],
+                'progress_meta' => [
+                    'phase' => 'rebrand',
+                    'total_files' => $safeTotal,
+                    'completed_files' => $index,
+                    'current_file_index' => $index + 1,
+                    'current_file_name' => $source['name'],
+                    'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
+                    'action' => 'Rewriting metadata',
+                ],
             ]);
             
             $sourceStem = pathinfo($source['name'], PATHINFO_FILENAME);
@@ -810,17 +975,65 @@ class StudioController extends Controller
                 $newProgress = 5 + (int)(($index / ($total ?: 1)) * 85 + $subProgress);
                 
                 if ($newProgress > $lastRebrandProgress) {
-                    $this->updateJob($jobId, ['progress' => min(94, $newProgress)]);
+                    $this->updateJob($jobId, [
+                        'progress' => min(94, $newProgress),
+                        'progress_meta' => [
+                            'phase' => 'rebrand',
+                            'total_files' => $safeTotal,
+                            'completed_files' => $index,
+                            'current_file_index' => $index + 1,
+                            'current_file_name' => $source['name'],
+                            'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
+                            'action' => $this->shouldRewriteMetadataFile($f)
+                                ? 'Rewriting metadata'
+                                : 'Inspecting packaged files',
+                        ],
+                    ]);
                     $lastRebrandProgress = $newProgress;
                 }
                 $counter++;
             }
 
+            $this->updateJob($jobId, [
+                'progress_meta' => [
+                    'phase' => 'rebrand',
+                    'total_files' => $safeTotal,
+                    'completed_files' => $index,
+                    'current_file_index' => $index + 1,
+                    'current_file_name' => $source['name'],
+                    'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
+                    'action' => 'Replacing identity assets',
+                ],
+            ]);
             $this->replaceBrandImagesInDirectory($workDir, $authorPicturePath, $signaturePath);
+
+            $this->updateJob($jobId, [
+                'progress_meta' => [
+                    'phase' => 'rebrand',
+                    'total_files' => $safeTotal,
+                    'completed_files' => $index,
+                    'current_file_index' => $index + 1,
+                    'current_file_name' => $source['name'],
+                    'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
+                    'action' => 'Renaming author paths',
+                ],
+            ]);
             $this->renameAuthorTaggedPaths($workDir, $authorReplacements);
 
             $newName = $this->buildOutputFilename($source['name'], $storeName);
             $outputPath = $outputDir . '/' . $newName;
+
+            $this->updateJob($jobId, [
+                'progress_meta' => [
+                    'phase' => 'rebrand',
+                    'total_files' => $safeTotal,
+                    'completed_files' => $index,
+                    'current_file_index' => $index + 1,
+                    'current_file_name' => $source['name'],
+                    'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
+                    'action' => 'Packaging output',
+                ],
+            ]);
             $this->zipDirectory($workDir, $outputPath);
             
             $rebrandedFiles[] = [
@@ -834,18 +1047,59 @@ class StudioController extends Controller
 
         $this->updateJob($jobId, [
             'progress' => 95,
-            'progress_message' => "Zipping final bundle..."
+            'progress_message' => "Zipping final bundle...",
+            'progress_meta' => [
+                'phase' => 'rebrand',
+                'total_files' => $safeTotal,
+                'completed_files' => $safeTotal,
+                'current_file_index' => $safeTotal,
+                'current_file_name' => $rebrandedFiles[count($rebrandedFiles) - 1]['name'] ?? ($job->files[$total - 1]['name'] ?? 'Package'),
+                'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
+                'action' => 'Zipping final bundle',
+            ],
         ]);
 
         $bundle = count($rebrandedFiles) > 0
             ? $this->buildOutputBundle($jobId, $rebrandedFiles, $finalZipName . '.zip')
             : null;
 
-        // Final Cleanup Level 1: Delete original uploads and large extracts
-        // We only keep the '/output' folder which has the rebranded zips
-        if (File::exists($this->storagePath . '/' . $jobId . '/work')) {
-            File::deleteDirectory($this->storagePath . '/' . $jobId . '/work');
+        if ($driveToken !== '' && count($rebrandedFiles) > 0) {
+            $this->updateJob($jobId, [
+                'progress' => 97,
+                'progress_message' => 'Syncing outputs to Google Drive...',
+                'progress_meta' => [
+                    'phase' => 'rebrand',
+                    'total_files' => $safeTotal,
+                    'completed_files' => $safeTotal,
+                    'current_file_index' => $safeTotal,
+                    'current_file_name' => $rebrandedFiles[count($rebrandedFiles) - 1]['name'] ?? ($job->files[$total - 1]['name'] ?? 'Package'),
+                    'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
+                    'action' => 'Syncing to Google Drive',
+                ],
+            ]);
+
+            try {
+                $driveSync = $this->syncManagedFilesToGoogleDrive($jobId, $rebrandedFiles, $driveToken, $driveStorage);
+                $rebrandedFiles = $driveSync['files'];
+                $driveStorage = $driveSync['drive_storage'];
+                $driveStorage['outputs_synced'] = count($rebrandedFiles);
+
+                if (is_array($bundle)) {
+                    $bundleSync = $this->syncManagedFilesToGoogleDrive($jobId, [$bundle], $driveToken, $driveStorage);
+                    $bundle = $bundleSync['files'][0] ?? $bundle;
+                    $driveStorage = $bundleSync['drive_storage'];
+                    $driveStorage['bundle_synced'] = isset($bundle['drive_file_id']);
+                }
+            } catch (\Throwable $e) {
+                Log::warning("Output Drive sync failed for job {$jobId}: " . $e->getMessage());
+                $driveStorage = $this->buildDriveStorageErrorState($driveStorage, $e->getMessage());
+            }
+        } elseif ($driveStorage !== []) {
+            $driveStorage['status'] = $driveStorage['status'] ?? 'synced';
         }
+
+        // Keep extracted work files until explicit cleanup so scanned previews
+        // and step-back review continue to work after completion.
         if (File::exists($this->storagePath . '/' . $jobId . '/input')) {
             File::deleteDirectory($this->storagePath . '/' . $jobId . '/input');
         }
@@ -855,16 +1109,37 @@ class StudioController extends Controller
             'outputs' => $rebrandedFiles,
             'bundle' => $bundle,
             'progress' => 100,
+            'progress_message' => 'Rebrand complete. Files are ready to download.',
+            'progress_meta' => [
+                'phase' => 'rebrand',
+                'total_files' => $safeTotal,
+                'completed_files' => $safeTotal,
+                'current_file_index' => $safeTotal,
+                'current_file_name' => $rebrandedFiles[count($rebrandedFiles) - 1]['name'] ?? ($job->files[$total - 1]['name'] ?? 'Package'),
+                'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
+                'action' => 'Complete',
+            ],
             'store_name' => $storeName,
             'final_zip_name' => $finalZipName,
+            'drive_storage' => $driveStorage,
         ]);
 
         return response()->json([
             'status' => 'completed',
             'outputs' => $rebrandedFiles,
             'bundle' => $bundle,
+            'progress_meta' => [
+                'phase' => 'rebrand',
+                'total_files' => $safeTotal,
+                'completed_files' => $safeTotal,
+                'current_file_index' => $safeTotal,
+                'current_file_name' => $rebrandedFiles[count($rebrandedFiles) - 1]['name'] ?? ($job->files[$total - 1]['name'] ?? 'Package'),
+                'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
+                'action' => 'Complete',
+            ],
             'store_name' => $storeName,
             'final_zip_name' => $finalZipName,
+            'drive_storage' => $driveStorage,
         ]);
     }
 
@@ -884,6 +1159,8 @@ class StudioController extends Controller
 
         $outputs = $job->outputs ?? [];
         $outputDir = $this->storagePath . '/' . $jobId . '/output';
+        $driveStorage = is_array($job->drive_storage ?? null) ? $job->drive_storage : [];
+        $driveToken = $this->resolveGoogleDriveAccessToken($request->input('drive_token'));
 
         $foundIndex = -1;
         foreach ($outputs as $index => $out) {
@@ -909,6 +1186,8 @@ class StudioController extends Controller
         }
 
         if ($oldName !== $newName) {
+            $oldDriveFileId = $outputs[$foundIndex]['drive_file_id'] ?? null;
+            $oldBundleDriveFileId = is_array($job->bundle) ? ($job->bundle['drive_file_id'] ?? null) : null;
             rename($oldPath, $newPath);
             $outputs[$foundIndex] = [
                 'name' => $newName,
@@ -923,16 +1202,52 @@ class StudioController extends Controller
             
             $bundle = $this->buildOutputBundle($jobId, $outputs, $job->final_zip_name . '.zip');
 
+            if ($driveToken !== '' && $driveStorage !== []) {
+                try {
+                    $outputSync = $this->syncManagedFilesToGoogleDrive(
+                        $jobId,
+                        [$outputs[$foundIndex]],
+                        $driveToken,
+                        $driveStorage,
+                        [0 => array_filter([(string) $oldDriveFileId])]
+                    );
+                    $outputs[$foundIndex] = $outputSync['files'][0] ?? $outputs[$foundIndex];
+                    $driveStorage = $outputSync['drive_storage'];
+
+                    if (is_array($bundle)) {
+                        $bundleSync = $this->syncManagedFilesToGoogleDrive(
+                            $jobId,
+                            [$bundle],
+                            $driveToken,
+                            $driveStorage,
+                            [0 => array_filter([(string) $oldBundleDriveFileId])]
+                        );
+                        $bundle = $bundleSync['files'][0] ?? $bundle;
+                        $driveStorage = $bundleSync['drive_storage'];
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning("Drive rename sync failed for job {$jobId}: " . $e->getMessage());
+                    $driveStorage = $this->buildDriveStorageErrorState($driveStorage, $e->getMessage());
+                }
+            } elseif ($driveStorage !== []) {
+                $driveStorage['status'] = 'out_of_sync';
+                $driveStorage['error'] = 'Output names changed locally. Reconnect Google Drive and rename again to resync.';
+            }
+
             $this->updateJob($jobId, [
                 'outputs' => $outputs,
-                'bundle' => $bundle
+                'bundle' => $bundle,
+                'drive_storage' => $driveStorage,
             ]);
         }
 
+        $freshJob = $this->getJob($jobId);
+
         return response()->json([
             'status' => 'renamed',
-            'outputs' => $job->outputs,
-            'bundle' => $job->bundle
+            'outputs' => $freshJob->outputs ?? $outputs,
+            'bundle' => $freshJob->bundle ?? ($job->bundle ?? null),
+            'drive_storage' => $freshJob->drive_storage ?? $driveStorage,
         ]);
     }
 
@@ -948,31 +1263,445 @@ class StudioController extends Controller
         return response()->json(['status' => 'success']);
     }
 
-    public function maintenanceCleanup(Request $request)
-    {
-        // Deep clean: delete all folders and records
-        $folders = File::directories($this->storagePath);
-        foreach ($folders as $folder) {
-            if (basename($folder) !== 'users') {
-                File::deleteDirectory($folder);
-            }
-        }
-        
-        // Log cleanup
-        try {
-            \App\Models\StorageLog::create([
-                'user_id' => Auth::id(),
-                'event_type' => 'cleanup',
-                'message' => 'User cleared working storage memory.',
-                'size_delta' => 0 // Would need to measure before and after for true delta
-            ]);
-        } catch (\Exception $e) {}
-
-        return response()->json(['status' => 'success', 'message' => 'All temporary storage cleared.']);
-    }
 
 
     // --- Helpers ---
+
+    private function hasOwnerManagedGoogleDriveStorage(): bool
+    {
+        $google = config('services.google');
+
+        return (bool) ($google['owner_managed'] ?? false)
+            && trim((string) ($google['client_id'] ?? '')) !== ''
+            && trim((string) ($google['client_secret'] ?? '')) !== ''
+            && trim((string) ($google['refresh_token'] ?? '')) !== '';
+    }
+
+    private function resolveGoogleDriveAccessToken(mixed $requestToken = null): string
+    {
+        if ($this->hasOwnerManagedGoogleDriveStorage()) {
+            try {
+                return $this->getOwnerManagedGoogleDriveAccessToken();
+            } catch (\Throwable $e) {
+                Log::warning('Owner-managed Google Drive token fetch failed: ' . $e->getMessage());
+            }
+        }
+
+        return trim((string) ($requestToken ?? ''));
+    }
+
+    private function getOwnerManagedGoogleDriveAccessToken(): string
+    {
+        if ($this->ownerDriveAccessToken && is_int($this->ownerDriveAccessTokenExpiresAt) && $this->ownerDriveAccessTokenExpiresAt > (time() + 60)) {
+            return $this->ownerDriveAccessToken;
+        }
+
+        if (!$this->hasOwnerManagedGoogleDriveStorage()) {
+            throw new \RuntimeException('Owner-managed Google Drive credentials are not configured.');
+        }
+
+        $google = config('services.google');
+        $response = Http::asForm()
+            ->timeout(60)
+            ->post('https://oauth2.googleapis.com/token', [
+                'client_id' => $google['client_id'],
+                'client_secret' => $google['client_secret'],
+                'refresh_token' => $google['refresh_token'],
+                'grant_type' => 'refresh_token',
+            ]);
+
+        if (!$response->successful()) {
+            throw new \RuntimeException('Google OAuth token refresh failed: ' . $response->body());
+        }
+
+        $accessToken = trim((string) $response->json('access_token'));
+        if ($accessToken === '') {
+            throw new \RuntimeException('Google OAuth token refresh returned an empty access token.');
+        }
+
+        $expiresIn = (int) ($response->json('expires_in') ?? 3600);
+        $this->ownerDriveAccessToken = $accessToken;
+        $this->ownerDriveAccessTokenExpiresAt = time() + max(300, $expiresIn);
+
+        return $this->ownerDriveAccessToken;
+    }
+
+    private function fetchGoogleDriveStorageQuota(string $token): array
+    {
+        $response = Http::timeout(60)
+            ->withToken($token)
+            ->get('https://www.googleapis.com/drive/v3/about', [
+                'fields' => 'storageQuota',
+            ]);
+
+        if (!$response->successful()) {
+            throw new \RuntimeException('Google Drive quota lookup failed: ' . $response->body());
+        }
+
+        $storageQuota = $response->json('storageQuota');
+        if (!is_array($storageQuota)) {
+            throw new \RuntimeException('Google Drive quota response is invalid.');
+        }
+
+        $limitBytes = (int) ($storageQuota['limit'] ?? 0);
+        $usedBytes = (int) ($storageQuota['usage'] ?? 0);
+        $remainingBytes = max(0, $limitBytes - $usedBytes);
+        $percent = $limitBytes > 0 ? ($usedBytes / $limitBytes) * 100 : 0;
+
+        $status = 'normal';
+        if ($percent >= 100) {
+            $status = 'full';
+        } elseif ($percent >= 80) {
+            $status = 'warning';
+        }
+
+        return [
+            'limit_bytes' => $limitBytes,
+            'used_bytes' => $usedBytes,
+            'remaining_bytes' => $remainingBytes,
+            'percent' => $percent,
+            'status' => $status,
+        ];
+    }
+
+    private function ensureGoogleDriveRootFolder(string $token): array
+    {
+        return Cache::remember('google_drive_owner_root_folder', now()->addDay(), function () use ($token) {
+            $appName = trim((string) config('app.name', 'THOR REBRAND TOOL'));
+            $rootFolderName = $appName !== '' ? $appName . ' Storage' : 'THOR REBRAND TOOL Storage';
+            $rootFolderId = $this->findOrCreateGoogleDriveFolder($token, $rootFolderName);
+
+            return [
+                'root_folder_id' => $rootFolderId,
+                'root_folder_name' => $rootFolderName,
+                'root_folder_url' => $this->buildGoogleDriveFolderUrl($rootFolderId),
+            ];
+        });
+    }
+
+    private function normalizeGoogleDriveQuotaError(string $message): string
+    {
+        $haystack = strtolower($message);
+
+        if (str_contains($haystack, 'accessnotconfigured') || str_contains($haystack, 'service_disabled') || str_contains($haystack, 'google drive api has not been used')) {
+            return 'Google Drive API is disabled in this Google Cloud project. Enable drive.googleapis.com, wait a minute, then refresh.';
+        }
+
+        if (str_contains($haystack, 'invalid_grant')) {
+            return 'The owner Google Drive refresh token is invalid or expired. Generate a new refresh token and update the .env file.';
+        }
+
+        if (str_contains($haystack, 'insufficient') && str_contains($haystack, 'scope')) {
+            return 'The owner Google Drive token is missing the required Drive scopes. Regenerate it with drive.file and drive.metadata.readonly.';
+        }
+
+        return 'Google Drive quota could not be loaded right now. Check the Drive API and owner OAuth credentials, then refresh.';
+    }
+
+    private function syncManagedFilesToGoogleDrive(
+        string $jobId,
+        array $files,
+        string $token,
+        array $driveStorage = [],
+        array $deleteFileIdsByIndex = []
+    ): array {
+        if (trim($token) === '') {
+            throw new \InvalidArgumentException('A Google Drive access token is required for storage sync.');
+        }
+
+        $folder = $this->ensureGoogleDriveJobFolder($token, $jobId, $driveStorage);
+        $driveStorage = $this->buildDriveStorageState($driveStorage, $folder);
+        $syncedFiles = [];
+
+        foreach ($files as $index => $file) {
+            if (!is_array($file)) {
+                continue;
+            }
+
+            $resolvedPath = $this->resolveJobManagedPath($jobId, $file['path'] ?? null);
+            if (!$resolvedPath || !File::exists($resolvedPath)) {
+                $syncedFiles[] = $file;
+                continue;
+            }
+
+            $uploaded = $this->uploadLocalFileToGoogleDrive(
+                $token,
+                $resolvedPath,
+                $file['name'] ?? basename($resolvedPath),
+                $folder['job_folder_id'],
+                $deleteFileIdsByIndex[$index] ?? []
+            );
+
+            $syncedFiles[] = array_merge($file, $this->buildDriveFileMetadata($uploaded));
+        }
+
+        $driveStorage['enabled'] = true;
+        $driveStorage['provider'] = 'google_drive';
+        $driveStorage['status'] = 'synced';
+        $driveStorage['error'] = null;
+        $driveStorage['last_synced_at'] = now()->toIso8601String();
+
+        return [
+            'files' => $syncedFiles,
+            'drive_storage' => $driveStorage,
+        ];
+    }
+
+    private function buildDriveStorageState(array $existing, array $folder): array
+    {
+        return array_merge($existing, [
+            'enabled' => true,
+            'provider' => 'google_drive',
+            'root_folder_id' => $folder['root_folder_id'],
+            'root_folder_url' => $folder['root_folder_url'],
+            'job_folder_id' => $folder['job_folder_id'],
+            'job_folder_url' => $folder['job_folder_url'],
+        ]);
+    }
+
+    private function buildDriveStorageErrorState(array $existing, string $message): array
+    {
+        $existing['enabled'] = $existing['enabled'] ?? true;
+        $existing['provider'] = 'google_drive';
+        $existing['status'] = 'error';
+        $existing['error'] = $message;
+        $existing['last_synced_at'] = now()->toIso8601String();
+
+        return $existing;
+    }
+
+    private function ensureGoogleDriveJobFolder(string $token, string $jobId, array $driveStorage = []): array
+    {
+        $jobFolderName = 'Job ' . $jobId;
+
+        $rootFolderId = isset($driveStorage['root_folder_id']) && is_string($driveStorage['root_folder_id'])
+            ? trim($driveStorage['root_folder_id'])
+            : '';
+        $jobFolderId = isset($driveStorage['job_folder_id']) && is_string($driveStorage['job_folder_id'])
+            ? trim($driveStorage['job_folder_id'])
+            : '';
+
+        if ($rootFolderId === '') {
+            $rootFolder = $this->ensureGoogleDriveRootFolder($token);
+            $rootFolderId = $rootFolder['root_folder_id'];
+            $rootFolderUrl = $rootFolder['root_folder_url'];
+        } else {
+            $rootFolderUrl = $this->buildGoogleDriveFolderUrl($rootFolderId);
+        }
+
+        if ($jobFolderId === '') {
+            $jobFolderId = $this->findOrCreateGoogleDriveFolder($token, $jobFolderName, $rootFolderId);
+        }
+
+        return [
+            'root_folder_id' => $rootFolderId,
+            'root_folder_url' => $rootFolderUrl,
+            'job_folder_id' => $jobFolderId,
+            'job_folder_url' => $this->buildGoogleDriveFolderUrl($jobFolderId),
+        ];
+    }
+
+    private function findOrCreateGoogleDriveFolder(string $token, string $name, ?string $parentId = null): string
+    {
+        $queryParts = [
+            "mimeType = 'application/vnd.google-apps.folder'",
+            "name = '" . $this->escapeGoogleDriveQueryValue($name) . "'",
+            'trashed = false',
+        ];
+
+        if ($parentId) {
+            $queryParts[] = "'" . $this->escapeGoogleDriveQueryValue($parentId) . "' in parents";
+        }
+
+        $response = Http::timeout(60)
+            ->withToken($token)
+            ->get('https://www.googleapis.com/drive/v3/files', [
+                'q' => implode(' and ', $queryParts),
+                'fields' => 'files(id,name)',
+                'pageSize' => 1,
+                'supportsAllDrives' => 'true',
+                'includeItemsFromAllDrives' => 'true',
+            ]);
+
+        if (!$response->successful()) {
+            throw new \RuntimeException('Google Drive folder lookup failed: ' . $response->body());
+        }
+
+        $existingId = $response->json('files.0.id');
+        if (is_string($existingId) && trim($existingId) !== '') {
+            return $existingId;
+        }
+
+        $payload = ['name' => $name, 'mimeType' => 'application/vnd.google-apps.folder'];
+        if ($parentId) {
+            $payload['parents'] = [$parentId];
+        }
+
+        $create = Http::timeout(60)
+            ->withToken($token)
+            ->post('https://www.googleapis.com/drive/v3/files?fields=id,name', $payload);
+
+        if (!$create->successful()) {
+            throw new \RuntimeException('Google Drive folder creation failed: ' . $create->body());
+        }
+
+        $folderId = $create->json('id');
+        if (!is_string($folderId) || trim($folderId) === '') {
+            throw new \RuntimeException('Google Drive returned an empty folder ID.');
+        }
+
+        return $folderId;
+    }
+
+    private function uploadLocalFileToGoogleDrive(
+        string $token,
+        string $localPath,
+        string $name,
+        string $parentId,
+        array $deleteFileIds = []
+    ): array {
+        foreach (array_filter(array_map('strval', $deleteFileIds)) as $fileId) {
+            $this->deleteGoogleDriveFile($token, $fileId);
+        }
+
+        $this->deleteGoogleDriveFilesByName($token, $name, $parentId);
+
+        $mimeType = File::mimeType($localPath) ?: 'application/octet-stream';
+        $size = filesize($localPath);
+        if ($size === false) {
+            throw new \RuntimeException("Failed to read file size for {$localPath}.");
+        }
+
+        $metadata = [
+            'name' => $name,
+            'parents' => [$parentId],
+        ];
+
+        $initResponse = Http::timeout(120)
+            ->withToken($token)
+            ->withHeaders([
+                'Content-Type' => 'application/json; charset=UTF-8',
+                'X-Upload-Content-Type' => $mimeType,
+                'X-Upload-Content-Length' => (string) $size,
+            ])
+            ->withBody(json_encode($metadata, JSON_THROW_ON_ERROR), 'application/json; charset=UTF-8')
+            ->send('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,webViewLink,webContentLink');
+
+        if (!$initResponse->successful()) {
+            throw new \RuntimeException('Google Drive resumable upload start failed: ' . $initResponse->body());
+        }
+
+        $uploadUrl = $initResponse->header('Location');
+        if (!is_string($uploadUrl) || trim($uploadUrl) === '') {
+            throw new \RuntimeException('Google Drive did not return a resumable upload URL.');
+        }
+
+        $stream = fopen($localPath, 'rb');
+        if ($stream === false) {
+            throw new \RuntimeException("Failed to open {$localPath} for Google Drive upload.");
+        }
+
+        try {
+            $uploadResponse = Http::timeout(1800)
+                ->withToken($token)
+                ->withHeaders([
+                    'Content-Length' => (string) $size,
+                    'Content-Type' => $mimeType,
+                ])
+                ->send('PUT', $uploadUrl, ['body' => $stream]);
+        } finally {
+            fclose($stream);
+        }
+
+        if (!$uploadResponse->successful()) {
+            throw new \RuntimeException('Google Drive file upload failed: ' . $uploadResponse->body());
+        }
+
+        $payload = $uploadResponse->json();
+        $fileId = $payload['id'] ?? null;
+        if (!is_string($fileId) || trim($fileId) === '') {
+            throw new \RuntimeException('Google Drive returned an empty file ID after upload.');
+        }
+
+        return [
+            'id' => $fileId,
+            'name' => $payload['name'] ?? $name,
+            'size' => isset($payload['size']) ? (int) $payload['size'] : $size,
+            'webViewLink' => $payload['webViewLink'] ?? $this->buildGoogleDriveFileUrl($fileId),
+            'webContentLink' => $payload['webContentLink'] ?? null,
+        ];
+    }
+
+    private function deleteGoogleDriveFilesByName(string $token, string $name, string $parentId): void
+    {
+        $response = Http::timeout(60)
+            ->withToken($token)
+            ->get('https://www.googleapis.com/drive/v3/files', [
+                'q' => implode(' and ', [
+                    "name = '" . $this->escapeGoogleDriveQueryValue($name) . "'",
+                    "'" . $this->escapeGoogleDriveQueryValue($parentId) . "' in parents",
+                    'trashed = false',
+                ]),
+                'fields' => 'files(id)',
+                'pageSize' => 100,
+                'supportsAllDrives' => 'true',
+                'includeItemsFromAllDrives' => 'true',
+            ]);
+
+        if (!$response->successful()) {
+            throw new \RuntimeException('Google Drive duplicate cleanup lookup failed: ' . $response->body());
+        }
+
+        foreach ($response->json('files', []) as $file) {
+            if (!is_array($file) || empty($file['id'])) {
+                continue;
+            }
+
+            $this->deleteGoogleDriveFile($token, (string) $file['id']);
+        }
+    }
+
+    private function deleteGoogleDriveFile(string $token, string $fileId): void
+    {
+        if (trim($fileId) === '') {
+            return;
+        }
+
+        $response = Http::timeout(60)
+            ->withToken($token)
+            ->delete("https://www.googleapis.com/drive/v3/files/{$fileId}");
+
+        if ($response->status() !== 204 && !$response->successful() && $response->status() !== 404) {
+            throw new \RuntimeException('Google Drive file delete failed: ' . $response->body());
+        }
+    }
+
+    private function buildDriveFileMetadata(array $file): array
+    {
+        $fileId = (string) ($file['id'] ?? '');
+
+        return [
+            'drive_file_id' => $fileId,
+            'drive_url' => $file['webViewLink'] ?? $this->buildGoogleDriveFileUrl($fileId),
+            'drive_download_url' => $file['webContentLink'] ?? null,
+            'storage_provider' => 'google_drive',
+        ];
+    }
+
+    private function buildGoogleDriveFolderUrl(string $folderId): string
+    {
+        return 'https://drive.google.com/drive/folders/' . rawurlencode($folderId);
+    }
+
+    private function buildGoogleDriveFileUrl(string $fileId): string
+    {
+        return 'https://drive.google.com/file/d/' . rawurlencode($fileId) . '/view';
+    }
+
+    private function escapeGoogleDriveQueryValue(string $value): string
+    {
+        return str_replace(['\\', '\''], ['\\\\', '\\\''], $value);
+    }
 
     private function classifyAsset($name) {
         $name = strtolower($name);
@@ -1149,13 +1878,7 @@ class StudioController extends Controller
 
     private function deleteJobData(string $jobId): void
     {
-        $jobPath = $this->storagePath . DIRECTORY_SEPARATOR . $jobId;
-        if (File::exists($jobPath)) {
-            File::deleteDirectory($jobPath);
-        }
-
-        // No record to delete, directory already gone
-        // StudioJob::where('job_id', $jobId)->delete();
+        $this->jobCleanup->deleteJobData($jobId);
     }
 
     private function buildAuthorReplacementMap(array $authors, string $newAuthor): array
@@ -1813,7 +2536,12 @@ PY;
         // Atomic write with retry
         for ($i = 0; $i < 3; $i++) {
             try {
+                $now = now();
                 $job = (array)($this->getJob($jobId) ?? []);
+                $data['created_at'] = $job['created_at'] ?? $data['created_at'] ?? $now->toIso8601String();
+                $data['updated_at'] = $now->toIso8601String();
+                $data['last_activity_at'] = $data['last_activity_at'] ?? $now->toIso8601String();
+                $data['expires_at'] = $data['expires_at'] ?? $now->copy()->addHours(max(1, (int) config('studio.job_retention_hours', 24)))->toIso8601String();
                 $job = array_merge($job, $data);
                 $json = json_encode($job, JSON_PRETTY_PRINT);
                 if ($json === false) throw new \Exception("JSON encode failed");
@@ -1830,5 +2558,21 @@ PY;
         }
         
         return (object)(array_merge((array)($this->getJob($jobId) ?? []), $data));
+    }
+
+    private function maybePurgeExpiredJobs(): void
+    {
+        $cacheKey = 'studio_jobs_cleanup:last_run';
+
+        if (!Cache::add($cacheKey, time(), now()->addMinutes(15))) {
+            return;
+        }
+
+        try {
+            $this->jobCleanup->purgeExpiredJobs();
+        } catch (\Throwable $e) {
+            Cache::forget($cacheKey);
+            Log::warning('Opportunistic studio cleanup failed: ' . $e->getMessage());
+        }
     }
 }

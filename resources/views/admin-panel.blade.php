@@ -9,6 +9,20 @@
     <p class="hero-desc">Approve new access requests, manage tool permissions, and maintain member security.</p>
 </div>
 
+@if(session('success'))
+<div class="admin-flash admin-flash--success fade-in">
+    <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+    <span>{{ session('success') }}</span>
+</div>
+@endif
+
+@if(session('error'))
+<div class="admin-flash admin-flash--error fade-in">
+    <i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
+    <span>{{ session('error') }}</span>
+</div>
+@endif
+
 <div class="fade-in" style="max-width: 1400px; margin: 0 auto 60px;">
     <div class="studio-card" style="padding: 0; overflow: hidden; border-radius: 20px;">
         <div style="padding: 24px 32px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02);">
@@ -49,9 +63,9 @@
                         </td>
                         <td style="padding: 24px 32px;">
                             <select onchange="updateStatus({{ $user->id }}, this.value)" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; outline: none;">
-                                <option value="pending" {{ $user->status === 'pending' ? 'selected' : '' }}>⏳ Pending</option>
-                                <option value="approved" {{ $user->status === 'approved' ? 'selected' : '' }}>✅ Approved</option>
-                                <option value="rejected" {{ $user->status === 'rejected' ? 'selected' : '' }}>❌ Rejected</option>
+                                <option value="pending" {{ $user->status === 'pending' ? 'selected' : '' }}><i class="fa-solid fa-hourglass-half"></i> Pending</option>
+                                <option value="approved" {{ $user->status === 'approved' ? 'selected' : '' }}><i class="fa-solid fa-circle-check"></i> Approved</option>
+                                <option value="rejected" {{ $user->status === 'rejected' ? 'selected' : '' }}><i class="fa-solid fa-circle-xmark"></i> Rejected</option>
                             </select>
                         </td>
                         <td style="padding: 24px 32px;">
@@ -78,12 +92,16 @@
                         <td style="padding: 24px 32px; text-align: right;">
                             <div style="display: flex; justify-content: flex-end; gap: 12px;">
                                 <button onclick="resetPassword({{ $user->id }})" class="btn btn-secondary" style="height: 40px; padding: 0 16px; font-size: 0.8rem; background: rgba(255,255,255,0.02);">
-                                    🔑 Reset Pass
+                                    <i class="fa-solid fa-key"></i> Reset Pass
                                 </button>
                                 @if(!$user->is_admin)
-                                <button onclick="deleteUser({{ $user->id }})" class="btn btn-secondary" style="height: 40px; width: 40px; padding: 0; color: var(--error); border-color: rgba(239, 68, 68, 0.2); background: rgba(239, 68, 68, 0.05);">
-                                    🗑️
-                                </button>
+                                <form method="POST" action="{{ route('admin.users.delete', $user->id) }}" onsubmit="return confirm('Are you sure you want to delete this member? This action is permanent.');" style="margin: 0;">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" class="btn btn-secondary" style="height: 40px; width: 40px; padding: 0; color: var(--error); border-color: rgba(239, 68, 68, 0.2); background: rgba(239, 68, 68, 0.05);" aria-label="Delete {{ $user->name }}">
+                                        <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                                    </button>
+                                </form>
                                 @endif
                             </div>
                         </td>
@@ -100,7 +118,7 @@
     <!-- Reset Password Modal -->
     <div id="passwordModal" class="studio-card fade-in" style="width: min(100%, 450px); margin: 0; display: none;">
         <div class="section-label">
-            <div class="step-number">🔑</div>
+            <div class="step-number"><i class="fa-solid fa-key"></i></div>
             <h2 class="section-title">Reset User Password</h2>
         </div>
         <p class="drop-subtext" style="margin-bottom: 24px;">Enter a new security credential for this member.</p>
@@ -121,6 +139,27 @@
     th, td { border-bottom: 1px solid var(--border-color); }
     table { border-spacing: 0; }
     .fade-in { animation: fadeIn 0.5s ease-out; }
+    .admin-flash {
+        max-width: 1400px;
+        margin: 0 auto 24px;
+        padding: 16px 20px;
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 700;
+        border: 1px solid transparent;
+    }
+    .admin-flash--success {
+        background: rgba(16, 185, 129, 0.12);
+        border-color: rgba(16, 185, 129, 0.28);
+        color: #8df0c4;
+    }
+    .admin-flash--error {
+        background: rgba(239, 68, 68, 0.12);
+        border-color: rgba(239, 68, 68, 0.28);
+        color: #ff9c9c;
+    }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 </style>
 
@@ -154,7 +193,7 @@
             });
             const data = await resp.json();
             if(data.success) {
-                showToast('✅ Status updated successfully');
+                showToast('<i class="fa-solid fa-circle-check"></i> Status updated successfully');
             } else {
                 alert(data.message || 'Error updating status');
             }
@@ -214,7 +253,7 @@
             });
             const data = await resp.json();
             if(data.success) {
-                showToast('🔑 Password changed');
+                showToast('<i class="fa-solid fa-key"></i> Password changed');
                 closeModal();
             } else {
                 alert(data.message || 'Error resetting password');
@@ -227,28 +266,6 @@
             btn.disabled = false;
         }
     };
-
-    async function deleteUser(userId) {
-        if (!confirm('Are you sure you want to delete this member? This action is permanent.')) return;
-
-        try {
-            const resp = await fetch(`/admin/users/${userId}`, {
-                method: 'DELETE',
-                headers: {
-                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                }
-            });
-            const data = await resp.json();
-            if(data.success) {
-                location.reload();
-            } else {
-                alert(data.message || 'Error deleting user');
-            }
-        } catch (e) {
-            console.error(e);
-            alert('Connection error');
-        }
-    }
 
     function showToast(msg) {
         // Simple notification (or use your existing toast system)

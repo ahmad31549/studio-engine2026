@@ -11,6 +11,7 @@
         href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Orbitron:wght@700;900&display=swap"
         rel="stylesheet" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
@@ -509,8 +510,30 @@
             color: #ccc;
             font-size: 13px;
             font-family: inherit;
-            margin-bottom: 12px;
+            margin-bottom: 0;
             cursor: pointer;
+            flex: 1 1 auto;
+        }
+
+        .type-select-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .type-icon-preview {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            flex: 0 0 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #f4d08f;
+            font-size: 15px;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
         }
 
         .add-product-btn {
@@ -803,13 +826,13 @@
         .pdf-hero {
             background: #000;
             color: #fff;
-            border-radius: 20px;
-            padding: 32px 36px;
+            border-radius: 24px;
+            padding: 30px 32px;
             margin-bottom: 28px;
             position: relative;
             overflow: hidden;
             border: 1px solid rgba(212, 160, 0, 0.2);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            box-shadow: 0 18px 42px rgba(0, 0, 0, 0.16);
         }
 
         .pdf-hero::before {
@@ -822,33 +845,125 @@
             z-index: 1;
         }
 
-        .pdf-hero-emoji {
-            font-size: 26px;
-            margin-bottom: 12px;
-            display: block;
+        .pdf-hero::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(115deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 38%);
+            opacity: 0.45;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .pdf-hero-layout {
             position: relative;
             z-index: 2;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .pdf-hero-top {
+            display: flex;
+            align-items: flex-start;
+            gap: 18px;
+        }
+
+        .pdf-hero-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            background: rgba(255, 255, 255, 0.18);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.16),
+                0 16px 28px rgba(0, 0, 0, 0.12);
+            color: inherit;
+        }
+
+        .pdf-hero-emoji {
+            font-size: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            color: inherit;
+        }
+
+        .pdf-hero-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .pdf-hero-kicker {
+            display: inline-flex;
+            align-items: center;
+            align-self: flex-start;
+            min-height: 32px;
+            padding: 0 13px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.16);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: inherit;
+            opacity: 0.86;
         }
 
         .pdf-hero-title {
-            font-size: 24px;
+            font-size: 29px;
             font-weight: 900;
             color: #fff;
-            letter-spacing: -0.5px;
-            margin-bottom: 8px;
-            line-height: 1.1;
-            position: relative;
-            z-index: 2;
+            letter-spacing: -0.04em;
+            line-height: 1.04;
+            margin: 0;
+            max-width: 560px;
+            white-space: normal;
         }
 
         .pdf-hero-msg {
-            font-size: 13px;
-            line-height: 1.7;
+            font-size: 13.5px;
+            line-height: 1.72;
             color: rgba(255,255,255,0.7);
             font-weight: 500;
-            max-width: 520px;
-            position: relative;
-            z-index: 2;
+            max-width: 560px;
+            margin: 0;
+        }
+
+        .pdf-hero-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .pdf-hero-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 36px;
+            padding: 0 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.14);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+            color: inherit;
+            font-size: 10.5px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            opacity: 0.9;
+        }
+
+        .pdf-hero-pill i {
+            font-size: 11px;
         }
 
         .pdf-page.gold-style:not(.artist-edition):not(.dark-mode) .pdf-header-badge {
@@ -1692,9 +1807,9 @@
             -webkit-text-fill-color: var(--artist-title-color);
             -webkit-text-stroke: 0.5px rgba(13, 11, 10, 0.22);
             text-shadow: 0 2px 0 rgba(22, 16, 12, 0.12), 0 10px 24px rgba(0, 0, 0, 0.22);
-            font-size: 28px;
+            font-size: 26px;
             line-height: 1.06;
-            max-width: 560px;
+            max-width: 100%;
         }
 
         .pdf-page.artist-edition .pdf-hero-msg {
@@ -2250,22 +2365,28 @@
 </head>
 
 <body>
+    @php
+        $initialWelcomeTitle = trim(strip_tags((string) ($record?->welcome_title ?? '')));
+        if ($initialWelcomeTitle === '') {
+            $initialWelcomeTitle = 'Your Files are Ready!';
+        }
+    @endphp
     <div class="orb orb-1"></div>
     <div class="orb orb-2"></div>
     <div id="spinner">
         <div class="spin-ring"></div>
-        <div class="spin-text">PDF BAN RAHA HAI...</div>
+        <div class="spin-text">GENERATING PDF...</div>
     </div>
 
     <nav>
         <div class="nav-content">
             <div class="brand">
-                <span class="brand-bolt">⚡</span>
+                <span class="brand-bolt"><i class="fa-solid fa-bolt"></i></span>
                 <div class="brand-text">ETSY <span>PDF LAB</span></div>
             </div>
             <div class="nav-actions">
-                <a href="{{ route('pdf.index') }}" class="btn btn-ghost">← Back</a>
-                <button id="saveBtn" class="btn btn-ghost">💾 Save Draft</button>
+                <a href="{{ route('pdf.index') }}" class="btn btn-ghost"><i class="fa-solid fa-arrow-left"></i> Back</a>
+                <button id="saveBtn" class="btn btn-ghost"><i class="fa-solid fa-floppy-disk"></i> Save Draft</button>
                 <div class="quality-wrap">
                     <select id="pdfQuality" class="quality-select">
                         <option value="standard">Standard (~2MB)</option>
@@ -2274,9 +2395,9 @@
                     </select>
                 </div>
                 <div class="filename-wrap">
-                    <input id="pdfFileName" type="text" placeholder="PDF ka naam likhein..." value="{{ $record?->title ?? ($record?->store_name ? $record->store_name . '-Download-Card' : 'ThorPresets-Download-Card') }}" class="filename-input">
+                    <input id="pdfFileName" type="text" placeholder="Enter PDF file name..." value="{{ $record?->title ?? ($record?->store_name ? $record->store_name . '-Download-Card' : 'ThorPresets-Download-Card') }}" class="filename-input">
                 </div>
-                <button id="downloadBtn" class="btn btn-primary">⬇️ Download PDF</button>
+                <button id="downloadBtn" class="btn btn-primary"><i class="fa-solid fa-download"></i> Download PDF</button>
             </div>
         </div>
     </nav>
@@ -2289,7 +2410,7 @@
             <!-- Store Info -->
             <div class="glass-card">
                 <div class="card-header">
-                    <div class="group-title" style="margin:0;">🏪 Store Details</div>
+                    <div class="group-title" style="margin:0;"><i class="fa-solid fa-store"></i> Store Details</div>
                     <div class="card-header-chevron">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -2320,7 +2441,7 @@
             <!-- Welcome Message -->
             <div class="glass-card">
                 <div class="card-header">
-                    <div class="group-title" style="margin:0;">💬 Thank You Message</div>
+                    <div class="group-title" style="margin:0;"><i class="fa-solid fa-comment-dots"></i> Thank You Message</div>
                     <div class="card-header-chevron">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -2331,8 +2452,8 @@
                     <div class="card-body-inner">
                         <div class="input-box">
                             <label>Welcome Title</label>
-                            <input id="welcomeTitle" type="text" placeholder="Your Files are Ready! ✨"
-                                value="{{ $record?->welcome_title ?? 'Your Files are Ready! ✨' }}">
+                            <input id="welcomeTitle" type="text" placeholder="Your Files are Ready!"
+                                value="{{ $initialWelcomeTitle }}">
                         </div>
                         <div class="input-box">
                             <label>Personal Message</label>
@@ -2346,7 +2467,7 @@
             <!-- Product Downloads -->
             <div class="glass-card">
                 <div class="card-header">
-                    <div class="group-title" style="margin:0;">📦 Download Links</div>
+                    <div class="group-title" style="margin:0;"><i class="fa-solid fa-box-open"></i> Download Links</div>
                     <div class="card-header-chevron">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -2356,7 +2477,7 @@
                 <div class="card-body-wrap">
                     <div class="card-body-inner">
                         <div id="productStack" class="product-stack" style="margin-bottom:12px;"></div>
-                        <button id="addProductBtn" class="add-product-btn">＋ Add Another File</button>
+                        <button id="addProductBtn" class="add-product-btn"><i class="fa-solid fa-plus"></i> Add Another File</button>
                     </div>
                 </div>
             </div>
@@ -2364,7 +2485,7 @@
             <!-- How to Use -->
             <div class="glass-card">
                 <div class="card-header">
-                    <div class="group-title" style="margin:0;">🎓 How to Use Steps</div>
+                    <div class="group-title" style="margin:0;"><i class="fa-solid fa-graduation-cap"></i> How to Use Steps</div>
                     <div class="card-header-chevron">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
@@ -2373,8 +2494,7 @@
                 </div>
                 <div class="card-body-wrap">
                     <div class="card-body-inner">
-                        <div style="font-size:11px;color:var(--text-dim);margin-bottom:18px;">Buyer ko bata dein kaise use
-                            karein (LUTs, Presets, Graphics)</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-bottom:18px;">Explain how the buyer should use the files (LUTs, presets, graphics)</div>
                         <div class="steps-grid">
                             <div class="step-box" style="grid-column:1/-1;">
                                 <div class="step-number">STEP 1</div>
@@ -2403,7 +2523,7 @@
 
             <div class="preview-sticky-header">
                 <div class="preview-top-bar">
-                    <div class="preview-label">👁 Live Preview</div>
+                    <div class="preview-label"><i class="fa-solid fa-eye"></i> Live Preview</div>
                     <div class="preview-actions">
                         <div class="theme-pills">
                             <button class="theme-pill theme-pill-gold active" data-style="gold-style" type="button">
@@ -2433,12 +2553,12 @@
                         </div>
                     </div>
                     <div class="theme-pills">
-                        <button class="theme-pill active" data-style="gold-style">⭐ Gold</button>
-                        <button class="theme-pill" data-style="purple-style">💜 Purple</button>
-                        <button class="theme-pill" data-style="black-style">🖤 Noir</button>
+                        <button class="theme-pill active" data-style="gold-style"><i class="fa-solid fa-star"></i> Gold</button>
+                        <button class="theme-pill" data-style="purple-style"><i class="fa-solid fa-circle" style="color: #a78bfa;"></i> Purple</button>
+                        <button class="theme-pill" data-style="black-style"><i class="fa-solid fa-circle" style="color: #374151;"></i> Noir</button>
                         <div class="mode-toggle">
-                            <button class="mode-btn active" data-mode="light">☀️</button>
-                            <button class="mode-btn" data-mode="dark">🌙</button>
+                            <button class="mode-btn active" data-mode="light"><i class="fa-solid fa-sun"></i></button>
+                            <button class="mode-btn" data-mode="dark"><i class="fa-solid fa-moon"></i></button>
                         </div>
                     </div>
                 </div>
@@ -2458,16 +2578,29 @@
                             </div>
                             <div class="pdf-header-badge">
                                 <div class="pdf-badge-line1" id="p-badge-line1">EXCLUSIVE DIGITAL DELIVERY</div>
-                                <div class="pdf-badge-line2">✦ Thank You Card</div>
+                                <div class="pdf-badge-line2"><i class="fa-solid fa-star-of-life"></i> Thank You Card</div>
                             </div>
                         </div>
 
                         <!-- HERO -->
                         <div class="pdf-hero">
-                            <span class="pdf-hero-emoji">🎉</span>
-                            <div class="pdf-hero-title" id="p-welcome-title">Your Files are Ready! ✨</div>
-                            <div class="pdf-hero-msg" id="p-welcome-msg">Thank you for your purchase! We've put a lot of
-                                love into these assets. If you need any help, just message us on Etsy.</div>
+                            <div class="pdf-hero-layout">
+                                <div class="pdf-hero-top">
+                                    <div class="pdf-hero-icon">
+                                        <span class="pdf-hero-emoji"><i class="fa-solid fa-gift" aria-hidden="true"></i></span>
+                                    </div>
+                                    <div class="pdf-hero-copy">
+                                        <div class="pdf-hero-kicker">Digital Delivery Ready</div>
+                                        <div class="pdf-hero-title" id="p-welcome-title">Your Files are Ready!</div>
+                                    </div>
+                                </div>
+                                <div class="pdf-hero-msg" id="p-welcome-msg">Thank you for your purchase! We've put a lot of
+                                    love into these assets. If you need any help, just message us on Etsy.</div>
+                                <div class="pdf-hero-meta">
+                                    <div class="pdf-hero-pill"><i class="fa-solid fa-link"></i> Access links included</div>
+                                    <div class="pdf-hero-pill"><i class="fa-solid fa-comments"></i> Support available on Etsy</div>
+                                </div>
+                            </div>
                         </div>
                         <div class="pdf-trust-strip" id="p-trust-strip" style="display:none;"></div>
 
@@ -2477,7 +2610,7 @@
 
                         <!-- HOW TO USE -->
                         <div class="pdf-how-section" id="p-how-section">
-                            <div class="pdf-how-title">📖 HOW TO USE YOUR FILES</div>
+                            <div class="pdf-how-title"><i class="fa-solid fa-book-open"></i> HOW TO USE YOUR FILES</div>
                             <div class="pdf-steps" id="p-steps-list">
                                 <!-- steps injected by JS -->
                             </div>
@@ -2490,7 +2623,7 @@
                                 <div class="pdf-footer-link" id="p-footer-link">etsy.com/shop/ThorPresets</div>
                             </div>
                             <div class="pdf-footer-right">
-                                <div class="pdf-stars">⭐⭐⭐⭐⭐</div>
+                                <div class="pdf-stars"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></div>
                                 <div class="pdf-review-cta" id="p-review-cta">LEAVE A REVIEW</div>
                             </div>
                         </div>
@@ -2502,7 +2635,8 @@
 
     </main>
 
-    <div id="toast"><span>✅</span>
+    <div id="toast">
+        <span id="toastIcon" aria-hidden="true"><i class="fa-solid fa-circle-check"></i></span>
         <div id="toastContent">Done!</div>
     </div>
 
@@ -2511,6 +2645,66 @@
         let currentTheme = 'gold-style';
         let currentMode = 'light';
         const EX = @json($record);
+        const DEFAULT_WELCOME_TITLE = 'Your Files are Ready!';
+        const DEFAULT_WELCOME_MESSAGE = "Thank you for your purchase! We've put a lot of love into these assets. If you need any help, just message us on Etsy.";
+        const ARTIST_WELCOME_TITLE = 'Your Procreate Brush Library Is Ready';
+        const ARTIST_WELCOME_MESSAGE = 'Thank you for supporting independent art. Every file in this order was prepared for a smooth Procreate workflow on iPad.';
+        const DEFAULT_DOWNLOAD_DESC = 'Instant Access | Digital Download | No Expiry';
+        const ARTIST_DOWNLOAD_DESC = 'Artist-crafted .brushset file | Instant digital delivery | Ready for Procreate on iPad';
+        const ICON_OPTIONS = [
+            { icon: 'fa-palette', html: '<i class="fa-solid fa-palette" aria-hidden="true"></i>', label: 'Graphic' },
+            { icon: 'fa-clapperboard', html: '<i class="fa-solid fa-clapperboard" aria-hidden="true"></i>', label: 'LUT / Video' },
+            { icon: 'fa-mountain-sun', html: '<i class="fa-solid fa-mountain-sun" aria-hidden="true"></i>', label: 'Preset / Photo' },
+            { icon: 'fa-camera', html: '<i class="fa-solid fa-camera" aria-hidden="true"></i>', label: 'Photo Pack' },
+            { icon: 'fa-image', html: '<i class="fa-solid fa-image" aria-hidden="true"></i>', label: 'Template' },
+            { icon: 'fa-music', html: '<i class="fa-solid fa-music" aria-hidden="true"></i>', label: 'Audio' },
+            { icon: 'fa-ruler-combined', html: '<i class="fa-solid fa-ruler-combined" aria-hidden="true"></i>', label: 'Vector / SVG' },
+            { icon: 'fa-paint-brush', html: '<i class="fa-solid fa-paint-brush" aria-hidden="true"></i>', label: 'Brush' },
+            { icon: 'fa-fire', html: '<i class="fa-solid fa-fire" aria-hidden="true"></i>', label: 'Bundle' },
+            { icon: 'fa-star', html: '<i class="fa-solid fa-star" aria-hidden="true"></i>', label: 'Other' },
+        ];
+
+        function stripHtml(value = '') {
+            const temp = document.createElement('div');
+            temp.innerHTML = String(value ?? '');
+            return (temp.textContent || temp.innerText || '').trim();
+        }
+
+        function getIconOption(iconName) {
+            return ICON_OPTIONS.find((option) => option.icon === iconName) || ICON_OPTIONS[0];
+        }
+
+        function getIconName(value) {
+            const matches = String(value ?? '').match(/fa-[a-z0-9-]+/ig) || [];
+            const ignored = new Set(['fa-solid', 'fa-regular', 'fa-brands', 'fa-light', 'fa-thin', 'fa-duotone', 'fa-sharp']);
+            const iconName = matches.map((match) => match.toLowerCase()).find((match) => !ignored.has(match)) || '';
+            if (iconName === 'fa-sparkles') {
+                return 'fa-star';
+            }
+
+            if (iconName === 'fa-lightbulb') {
+                return 'fa-paint-brush';
+            }
+
+            return iconName;
+        }
+
+        function normalizeIconMarkup(value) {
+            return getIconOption(getIconName(value)).html;
+        }
+
+        if (EX) {
+            EX.welcome_title = stripHtml(EX.welcome_title || '');
+            EX.welcome_msg = stripHtml(EX.welcome_msg || '');
+            EX.products = Array.isArray(EX.products)
+                ? EX.products.map((product) => ({
+                    ...product,
+                    name: stripHtml(product?.name || ''),
+                    desc: stripHtml(product?.desc || ''),
+                    type: normalizeIconMarkup(product?.type),
+                }))
+                : [];
+        }
 
         // ── Helpers ──────────────────────────────────────────
         function v(id) {
@@ -2518,7 +2712,15 @@
             return el ? el.value.trim() : '';
         }
 
+        function hasArtistIcon(products = []) {
+            return products.some((product) => getIconName(product?.type) === 'fa-paint-brush');
+        }
+
         function isArtistEdition() {
+            if (hasArtistIcon(EX?.products || []) || hasArtistIcon(assets)) {
+                return true;
+            }
+
             const snapshot = [
                 EX?.store_name,
                 EX?.title,
@@ -2532,6 +2734,25 @@
                 new URLSearchParams(window.location.search).get('preset')
             ].join(' ').toLowerCase();
             return /drdoom|doom|procreate|brushset|brush library|ipad/.test(snapshot);
+        }
+
+        function syncWelcomeDefaults(artistEdition) {
+            const welcomeTitleInput = document.getElementById('welcomeTitle');
+            const welcomeMsgInput = document.getElementById('welcomeMsg');
+
+            if (welcomeTitleInput) {
+                const title = welcomeTitleInput.value.trim();
+                if (!title || title === DEFAULT_WELCOME_TITLE || title === ARTIST_WELCOME_TITLE) {
+                    welcomeTitleInput.value = artistEdition ? ARTIST_WELCOME_TITLE : DEFAULT_WELCOME_TITLE;
+                }
+            }
+
+            if (welcomeMsgInput) {
+                const message = welcomeMsgInput.value.trim();
+                if (!message || message === DEFAULT_WELCOME_MESSAGE || message === ARTIST_WELCOME_MESSAGE) {
+                    welcomeMsgInput.value = artistEdition ? ARTIST_WELCOME_MESSAGE : DEFAULT_WELCOME_MESSAGE;
+                }
+            }
         }
 
         function applyPdfRootClasses() {
@@ -2570,9 +2791,9 @@
         // ── Bootstrap ──────────────────────────────────────────
         function bootstrap() {
             if (EX?.products?.length) {
-                EX.products.forEach(p => addAsset(p.name, p.link, p.type || '🎨', p.desc || ''));
+                EX.products.forEach((product) => addAsset(product.name, product.link, product.type, product.desc || ''));
             } else {
-                addAsset('', '', '🎨', '');
+                addAsset('', '', normalizeIconMarkup('fa-palette'), '');
             }
 
             const savedTheme = EX?.theme;
@@ -2596,7 +2817,16 @@
 
             setupAccordions();
             bindInputs();
-            
+            const welcomeTitleInput = document.getElementById('welcomeTitle');
+            if (welcomeTitleInput && /<i\s/i.test(welcomeTitleInput.value)) {
+                welcomeTitleInput.value = DEFAULT_WELCOME_TITLE;
+            }
+            const step2Input = document.getElementById('step2');
+            if (step2Input && /[^\x20-\x7E]/.test(step2Input.value)) {
+                step2Input.value = 'Open Lightroom, Premiere Pro, or your editing app. Go to Import, navigate to the extracted folder, and select the files.';
+            }
+            syncWelcomeDefaults(isArtistEdition());
+             
             // Toggle Listeners
             document.querySelectorAll('.theme-pill').forEach(btn => {
                 btn.addEventListener('click', () => setTheme(btn.dataset.style));
@@ -2611,8 +2841,14 @@
         }
 
         // ── Assets ─────────────────────────────────────────────
-        function addAsset(name = '', link = '', type = '🎨', desc = '') {
-            assets.push({ id: 'a' + Date.now() + Math.random(), name, link, type, desc });
+        function addAsset(name = '', link = '', type = normalizeIconMarkup('fa-palette'), desc = '') {
+            assets.push({
+                id: 'a' + Date.now() + Math.random(),
+                name,
+                link,
+                type: normalizeIconMarkup(type),
+                desc,
+            });
             updateStack();
             renderAll();
         }
@@ -2623,13 +2859,14 @@
             renderAll();
         }
 
-        const ICONS = ['🎨', '🎬', '🌅', '📸', '🖼️', '🎵', '📐', '💡', '🔥', '✨'];
+        const ICONS = ['<i class="fa-solid fa-palette"></i>', '<i class="fa-solid fa-clapperboard"></i>', '<i class="fa-solid fa-mountain-sun"></i>', '<i class="fa-solid fa-camera"></i>', '<i class="fa-solid fa-image"></i>', '<i class="fa-solid fa-music"></i>', '<i class="fa-solid fa-ruler-combined"></i>', '<i class="fa-solid fa-paint-brush"></i>', '<i class="fa-solid fa-fire"></i>', '<i class="fa-solid fa-star"></i>'];
 
         function updateStack() {
             const stackEl = document.getElementById('productStack');
             stackEl.innerHTML = '';
             assets.forEach((ast, i) => {
                 const div = document.createElement('div');
+                const selectedIcon = getIconName(ast.type) || 'fa-palette';
                 div.className = 'product-item';
                 div.innerHTML = `
                     <div class="product-header">
@@ -2638,9 +2875,12 @@
                     </div>
                     <div style="margin-bottom:10px;">
                         <label style="font-size:10px;font-weight:700;color:var(--text-dim);letter-spacing:.5px;">TYPE ICON</label>
-                        <select class="type-select" onchange="syncAsset('${ast.id}','type',this.value)">
+                        <div class="type-select-row">
+                            <div class="type-icon-preview" aria-hidden="true">${getIconOption(selectedIcon).html}</div>
+                            <select class="type-select" onchange="syncAsset('${ast.id}','type',getIconOption(this.value).html)">
                             ${ICONS.map(ic => `<option value="${ic}" ${ast.type === ic ? 'selected' : ''}>${ic} — ${iconLabel(ic)}</option>`).join('')}
-                        </select>
+                            </select>
+                        </div>
                     </div>
                     <div class="input-box">
                         <label>File / Pack Name</label>
@@ -2655,12 +2895,21 @@
                         <input type="text" value="${esc(ast.link)}" placeholder="https://drive.google.com/..." oninput="syncAsset('${ast.id}','link',this.value)">
                     </div>
                 `;
+                const removeBtn = div.querySelector('.remove-btn');
+                if (removeBtn) removeBtn.innerHTML = '<i class="fa-solid fa-trash" aria-hidden="true"></i> Remove';
+                const typeSelect = div.querySelector('.type-select');
+                if (typeSelect) {
+                    typeSelect.innerHTML = ICON_OPTIONS
+                        .map((option) => `<option value="${option.icon}">${option.label}</option>`)
+                        .join('');
+                    typeSelect.value = selectedIcon;
+                }
                 stackEl.appendChild(div);
             });
         }
 
         function iconLabel(ic) {
-            const map = { '🎨': 'Graphic', '🎬': 'LUT / Video', '🌅': 'Preset / Photo', '📸': 'Photo Pack', '🖼️': 'Template', '🎵': 'Audio', '📐': 'Vector / SVG', '💡': 'Brush', '🔥': 'Bundle', '✨': 'Other' };
+            const map = { '<i class="fa-solid fa-palette"></i>': 'Graphic', '<i class="fa-solid fa-clapperboard"></i>': 'LUT / Video', '<i class="fa-solid fa-mountain-sun"></i>': 'Preset / Photo', '<i class="fa-solid fa-camera"></i>': 'Photo Pack', '<i class="fa-solid fa-image"></i>': 'Template', '<i class="fa-solid fa-music"></i>': 'Audio', '<i class="fa-solid fa-ruler-combined"></i>': 'Vector / SVG', '<i class="fa-solid fa-paint-brush"></i>': 'Brush', '<i class="fa-solid fa-fire"></i>': 'Bundle', '<i class="fa-solid fa-star"></i>': 'Other' };
             return map[ic] || 'Asset';
         }
 
@@ -2668,7 +2917,11 @@
 
         function syncAsset(id, key, val) {
             const ast = assets.find(a => a.id === id);
-            if (ast) ast[key] = val;
+            if (ast) ast[key] = key === 'type' ? normalizeIconMarkup(val) : val;
+            if (key === 'type') {
+                syncWelcomeDefaults(isArtistEdition());
+                updateStack();
+            }
             renderAll();
         }
 
@@ -2687,16 +2940,18 @@
             const store = v('storeName') || 'ThorPresets';
             const link = v('storeLink') || 'etsy.com/shop/your';
             const createdBy = v('createdBy') || store || 'Independent Artist';
-            const title = v('welcomeTitle') || 'Your Files are Ready! ✨';
-            const msg = v('welcomeMsg') || 'Thank you for your purchase!';
+            const rawTitle = v('welcomeTitle');
+            const rawMsg = v('welcomeMsg');
+            const title = rawTitle || DEFAULT_WELCOME_TITLE;
+            const msg = rawMsg || DEFAULT_WELCOME_MESSAGE;
             const s1 = v('step1') || '';
             const s2 = v('step2') || '';
             const s3 = v('step3') || '';
-            const effectiveTitle = artistEdition && !v('welcomeTitle')
-                ? 'Your Procreate Brush Library Is Ready'
+            const effectiveTitle = artistEdition && (!rawTitle || rawTitle === DEFAULT_WELCOME_TITLE)
+                ? ARTIST_WELCOME_TITLE
                 : title;
-            const effectiveMsg = artistEdition && !v('welcomeMsg')
-                ? 'Thank you for supporting independent art. Every file in this order was prepared for a smooth Procreate workflow on iPad.'
+            const effectiveMsg = artistEdition && (!rawMsg || rawMsg === DEFAULT_WELCOME_MESSAGE)
+                ? ARTIST_WELCOME_MESSAGE
                 : msg;
 
             // Logo Render Logic
@@ -2709,7 +2964,9 @@
             const badgeLine2 = document.querySelector('.pdf-badge-line2');
             if (badgeLine2) badgeLine2.textContent = artistEdition ? 'Artist Download Guide' : 'Thank You Card';
             const heroEmoji = document.querySelector('.pdf-hero-emoji');
-            if (heroEmoji) heroEmoji.textContent = artistEdition ? '🖌️' : '🎉';
+            if (heroEmoji) heroEmoji.innerHTML = artistEdition
+                ? '<i class="fa-solid fa-paint-brush" aria-hidden="true"></i>'
+                : '<i class="fa-solid fa-gift" aria-hidden="true"></i>';
             document.getElementById('p-section-label').textContent = artistEdition ? 'YOUR PROCREATE DOWNLOADS' : 'YOUR DOWNLOAD LINKS';
             const howTitle = document.querySelector('.pdf-how-title');
             if (howTitle) howTitle.textContent = artistEdition ? 'PROCREATE INSTALL GUIDE' : 'HOW TO USE YOUR FILES';
@@ -2744,6 +3001,7 @@
                 const card = document.createElement('div');
                 card.className = `pdf-download-card ${currentTheme}${artistEdition ? ' artist-card' : ''}`;
                 const fallbackName = artistEdition ? 'Procreate Brushset Download' : 'Premium Asset Pack';
+                const normalizedDesc = artistEdition ? ARTIST_DOWNLOAD_DESC : DEFAULT_DOWNLOAD_DESC;
                 const fallbackDesc = artistEdition
                     ? 'Artist-crafted .brushset file · Instant digital delivery · Ready for Procreate on iPad'
                     : 'Instant Access Â· Digital Download Â· No Expiry';
@@ -2751,7 +3009,7 @@
                     ? '<div class="card-meta-line">INDEPENDENT ARTIST RELEASE · PERSONAL-USE DIGITAL PRODUCT</div>'
                     : '';
                 card.innerHTML = `
-                    <div class="card-icon-wrap">${ast.type || '🎨'}</div>
+                    <div class="card-icon-wrap">${ast.type || '<i class="fa-solid fa-palette"></i>'}</div>
                     <div class="card-body">
                         <div class="card-num">FILE ${String(i + 1).padStart(2, '0')}</div>
                         <div class="card-name">${ast.name || fallbackName}</div>
@@ -2759,10 +3017,12 @@
                         <a href="${ast.link || '#'}" class="pdf-dl-btn" target="_blank">⬇ Download Now</a>
                     </div>
                 `;
+                const iconEl = card.querySelector('.card-icon-wrap');
+                if (iconEl) iconEl.innerHTML = normalizeIconMarkup(ast.type);
+                const buttonEl = card.querySelector('.pdf-dl-btn');
+                if (buttonEl) buttonEl.innerHTML = '<i class="fa-solid fa-download" aria-hidden="true"></i> Download Now';
                 const subEl = card.querySelector('.card-sub');
-                if (subEl) subEl.textContent = ast.desc || (artistEdition
-                    ? 'Artist-crafted .brushset file | Instant digital delivery | Ready for Procreate on iPad'
-                    : 'Instant Access | Digital Download | No Expiry');
+                if (subEl) subEl.textContent = ast.desc || normalizedDesc;
                 if (artistEdition) {
                     const bodyEl = card.querySelector('.card-body');
                     const ctaEl = card.querySelector('.pdf-dl-btn');
@@ -2907,12 +3167,12 @@
                     try {
                         const errJson = JSON.parse(errText);
                         const msg = errJson.message || Object.values(errJson.errors || {}).flat().join(', ') || 'Unknown error';
-                        notify('❌ ' + msg);
+                        notify(msg, 'fa-circle-xmark');
                     } catch {
                         if (r.status === 419) {
-                            notify('⚠️ Session expired. Refresh the page (Ctrl+Shift+R) and try again.');
+                            notify('Session expired. Refresh the page (Ctrl+Shift+R) and try again.', 'fa-triangle-exclamation');
                         } else {
-                            notify('❌ Server error (' + r.status + ')');
+                            notify('Server error (' + r.status + ')', 'fa-circle-xmark');
                         }
                     }
                     return;
@@ -2920,19 +3180,19 @@
 
                 const d = await r.json();
                 if (d.success) {
-                    notify('💾 Saved successfully!');
+                    notify('Saved successfully!', 'fa-floppy-disk');
                     // Update URL if new record was created
                     if (d.id && !@json($record?->id ?? '')) {
                         window.history.replaceState({}, '', '/studio/pdf/edit/' + d.id);
                     }
                 } else {
-                    notify('❌ ' + (d.message || 'Unknown error'));
+                    notify(d.message || 'Unknown error', 'fa-circle-xmark');
                 }
             } catch (e) {
                 console.error('Network error:', e);
-                notify('❌ Network error: ' + e.message);
+                notify('Network error: ' + e.message, 'fa-circle-xmark');
             } finally {
-                btn.disabled = false; btn.textContent = '💾 Save Draft';
+                btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Draft';
             }
         });
 
@@ -2989,21 +3249,22 @@
                 const sizeMB = (pdfBlob.size / (1024 * 1024)).toFixed(1);
 
                 pdf.save(getPdfFileName());
-                notify(`✅ PDF download ho gayi! (${sizeMB} MB)`);
+                notify(`PDF download ho gayi! (${sizeMB} MB)`, 'fa-circle-check');
             } catch (e) {
                 console.error('PDF error:', e);
-                notify('❌ Error: ' + e.message);
+                notify('Error: ' + e.message, 'fa-circle-xmark');
             } finally {
                 rescale();
-                btn.disabled = false; btn.innerHTML = '⬇️ Download PDF';
+                btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-download"></i> Download PDF';
                 spinner.classList.remove('show');
             }
         });
 
         // ── Notify ───────────────────────────────────────────
-        function notify(msg) {
+        function notify(message, iconClass = 'fa-circle-check') {
             const t = document.getElementById('toast');
-            document.getElementById('toastContent').textContent = msg;
+            document.getElementById('toastIcon').innerHTML = `<i class="fa-solid ${iconClass}"></i>`;
+            document.getElementById('toastContent').textContent = message;
             t.classList.add('active');
             setTimeout(() => t.classList.remove('active'), 4000);
         }

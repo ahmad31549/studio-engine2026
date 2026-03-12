@@ -61,20 +61,34 @@ class AdminController extends Controller
         return response()->json(['success' => true, 'message' => 'Password reset successfully']);
     }
 
-    public function deleteUser($id)
+    public function deleteUser(Request $request, $id)
     {
         if (!auth()->user()->is_admin) {
-            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+            return $this->deleteUserResponse($request, false, 'Unauthorized', 403);
         }
 
         $user = User::findOrFail($id);
         
         if ($user->is_admin) {
-            return response()->json(['success' => false, 'message' => 'Cannot delete admin user'], 400);
+            return $this->deleteUserResponse($request, false, 'Cannot delete admin user', 400);
         }
 
         $user->delete();
 
-        return response()->json(['success' => true, 'message' => 'User deleted']);
+        return $this->deleteUserResponse($request, true, 'User deleted successfully.');
+    }
+
+    private function deleteUserResponse(Request $request, bool $success, string $message, int $status = 200)
+    {
+        if ($request->expectsJson() || $request->ajax()) {
+            return response()->json([
+                'success' => $success,
+                'message' => $message,
+            ], $status);
+        }
+
+        return redirect()
+            ->route('admin.index')
+            ->with($success ? 'success' : 'error', $message);
     }
 }

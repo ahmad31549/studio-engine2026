@@ -14,7 +14,7 @@
     <div id="loginView" style="display: none; justify-content: center; padding: 40px 0;">
         <div class="studio-card" style="width: min(100%, 450px);">
             <div class="section-label">
-                <div class="step-number">🔒</div>
+                <div class="step-number"><i class="fa-solid fa-lock"></i></div>
                 <h2 class="section-title">Admin Access</h2>
             </div>
             <form id="loginForm" class="control-group" style="gap: 20px;">
@@ -211,7 +211,7 @@
             const div = document.createElement('div');
             div.className = 'file-item';
             div.innerHTML = `
-                <div class="file-icon">${job.status === 'completed' ? '✅' : '⏳'}</div>
+                <div class="file-icon">${job.status === 'completed' ? '<i class="fa-solid fa-circle-check"></i>' : '<i class="fa-solid fa-hourglass-half"></i>'}</div>
                 <div class="file-info">
                     <div class="file-name">Job ${job.id.substring(0, 8)}</div>
                     <div class="file-meta">${new Date((job.created_at || 0) * 1000).toLocaleString()}</div>

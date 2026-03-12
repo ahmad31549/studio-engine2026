@@ -12,9 +12,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     @unless (app()->environment('testing'))
-        @vite(['resources/css/app.css', 'resources/js/app.js'])
+        @vite(['resources/css/app.css'])
     @endunless
     
     @stack('styles')
@@ -37,6 +38,9 @@
             <div class="nav-links">
                 <a href="/" class="nav-link {{ request()->is('/') ? 'active' : '' }}">Studio</a>
                 @auth
+                    @if(auth()->user()->is_admin)
+                        <a href="{{ route('admin.index') }}" class="nav-link {{ request()->is('admin') ? 'active' : '' }}">Members</a>
+                    @endif
                     <a href="/setting" class="nav-link {{ request()->is('setting', 'profile*') ? 'active' : '' }}">Settings</a>
                 @else
                     <a href="/login" class="nav-link">Sign In</a>

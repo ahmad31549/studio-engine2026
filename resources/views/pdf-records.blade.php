@@ -7,6 +7,7 @@
     <title>Etsy PDF Lab — My Records</title>
 
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <style>
         :root {
@@ -428,7 +429,7 @@
     <nav>
         <div class="nav-inner">
             <a href="{{ route('selection') }}" class="brand">
-                <span class="brand-bolt">⚡</span>
+                <span class="brand-bolt"><i class="fa-solid fa-bolt"></i></span>
                 <span class="brand-text">ETSY <span>PDF LAB</span></span>
             </a>
             <a href="{{ route('selection') }}" class="nav-back">
@@ -443,7 +444,7 @@
         <!-- Flash Message -->
         @if(session('success'))
         <div class="flash">
-            <span>✅</span>
+            <span><i class="fa-solid fa-circle-check"></i></span>
             {{ session('success') }}
         </div>
         @endif
@@ -451,15 +452,15 @@
         <!-- PAGE HEADER -->
         <div class="page-header">
             <div class="page-header-left">
-                <h1>Aapke <span>PDF Records</span> 📄</h1>
-                <p>Pehle se banaye gaye PDFs dekhen, edit karein ya naya banayein</p>
+                <h1>Your <span>PDF Records</span> <i class="fa-solid fa-file-pdf"></i></h1>
+                <p>Review saved PDFs, edit them, or create a new one</p>
             </div>
             <div style="display: flex; gap: 12px;">
                 <a href="{{ route('pdf.create', ['preset' => 'thor']) }}" class="btn btn-primary">
-                    ⚡ Naya PDF (ThorPresets)
+                    <i class="fa-solid fa-bolt"></i> New PDF (ThorPresets)
                 </a>
                 <a href="{{ route('pdf.create', ['preset' => 'drdoom']) }}" class="btn btn-primary" style="background: linear-gradient(135deg, #FF6B6B 0%, #C92A2A 100%); box-shadow: 0 4px 20px rgba(201,42,42,0.22); color: #fff;">
-                    🩸 Naya PDF (DrDOOMARTS)
+                    <i class="fa-solid fa-skull"></i> New PDF (DrDOOMARTS)
                 </a>
             </div>
         </div>
@@ -477,17 +478,17 @@
             </div>
             <div class="stat-card">
                 <div class="stat-value purple">{{ $goldCount }}</div>
-                <div class="stat-label"><span style="color:#fbbf24;">★</span> Gold Theme</div>
+                <div class="stat-label"><i class="fa-solid fa-star" aria-hidden="true" style="color:#fbbf24;"></i> Gold Theme</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value green">{{ $totalProds }}</div>
-                <div class="stat-label">Kul Products</div>
+                <div class="stat-label">Total Products</div>
             </div>
         </div>
 
         <!-- RECORDS SECTION -->
         <div class="section-heading">
-            <span class="section-heading-text">Aapke Saved PDFs</span>
+            <span class="section-heading-text">Your Saved PDFs</span>
             <div class="section-heading-line"></div>
         </div>
 
@@ -506,13 +507,13 @@
             <div class="record-card">
                 <div class="record-title">{{ $rec->title }}</div>
                 <div class="record-store">
-                    <div class="record-store-icon">🏪</div>
+                    <div class="record-store-icon"><i class="fa-solid fa-store"></i></div>
                     {{ $rec->store_name }}
                 </div>
 
                 <div class="record-tags">
                     <span class="tag {{ $themeClass }}">{{ $themeLabel }}</span>
-                    <span class="tag tag-product">🧩 {{ $prodCount }} Product{{ $prodCount != 1 ? 's' : '' }}</span>
+                    <span class="tag tag-product"><i class="fa-solid fa-layer-group"></i> {{ $prodCount }} Product{{ $prodCount != 1 ? 's' : '' }}</span>
                 </div>
 
                 <div class="record-time">
@@ -523,23 +524,23 @@
                 </div>
 
                 <div class="record-actions">
-                    <a href="{{ route('pdf.preview', $rec->id) }}" class="btn btn-ghost btn-sm" target="_blank">👁 Preview</a>
-                    <a href="{{ route('pdf.edit', $rec->id) }}" class="btn btn-ghost btn-sm" style="border-color: rgba(255,215,0,0.2); color: var(--accent);">✏️ Edit</a>
-                    <form method="POST" action="{{ route('pdf.delete', $rec->id) }}" onsubmit="return confirm('Is PDF record ko delete karein?');" style="margin:0;">
+                    <a href="{{ route('pdf.preview', $rec->id) }}" class="btn btn-ghost btn-sm" target="_blank"><i class="fa-solid fa-eye"></i> Preview</a>
+                    <a href="{{ route('pdf.edit', $rec->id) }}" class="btn btn-ghost btn-sm" style="border-color: rgba(255,215,0,0.2); color: var(--accent);"><i class="fa-solid fa-pen-to-square"></i> Edit</a>
+                    <form method="POST" action="{{ route('pdf.delete', $rec->id) }}" onsubmit="return confirm('Delete this PDF record?');" style="margin:0;">
                         @csrf
                         @method('DELETE')
-                        <button type="submit" class="btn btn-danger btn-sm">🗑 Delete</button>
+                        <button type="submit" class="btn btn-danger btn-sm"><i class="fa-solid fa-trash"></i> Delete</button>
                     </form>
                 </div>
             </div>
             @empty
             <div class="empty-state">
-                <div class="empty-icon">📭</div>
-                <h3>Koi PDF Record Nahi Mila</h3>
-                <p>Abhi tak koi PDF nahi banaya. Naya PDF banao aur apne Etsy store ke liye professional listing assets tayyar karo.</p>
+                <div class="empty-icon"><i class="fa-solid fa-folder-open"></i></div>
+                <h3>No PDF Records Found</h3>
+                <p>You have not created any PDFs yet. Start a new PDF and prepare professional listing assets for your Etsy store.</p>
                 <div style="display: flex; gap: 12px; justify-content: center; margin-top: 15px;">
-                    <a href="{{ route('pdf.create', ['preset' => 'thor']) }}" class="btn btn-primary">⚡ Pehla PDF (ThorPresets)</a>
-                    <a href="{{ route('pdf.create', ['preset' => 'drdoom']) }}" class="btn btn-primary" style="background: linear-gradient(135deg, #FF6B6B 0%, #C92A2A 100%); color: #fff;">🩸 Pehla PDF (DrDOOMARTS)</a>
+                    <a href="{{ route('pdf.create', ['preset' => 'thor']) }}" class="btn btn-primary"><i class="fa-solid fa-bolt"></i> Create First PDF (ThorPresets)</a>
+                    <a href="{{ route('pdf.create', ['preset' => 'drdoom']) }}" class="btn btn-primary" style="background: linear-gradient(135deg, #FF6B6B 0%, #C92A2A 100%); color: #fff;"><i class="fa-solid fa-skull"></i> Create First PDF (DrDOOMARTS)</a>
                 </div>
             </div>
             @endforelse
@@ -548,3 +549,4 @@
     </div>
 </body>
 </html>
+

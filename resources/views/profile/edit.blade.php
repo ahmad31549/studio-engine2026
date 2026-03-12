@@ -9,6 +9,13 @@
     <p class="hero-desc">Update your personal information and account security preferences.</p>
 </div>
 
+<div class="fade-in" style="max-width: 800px; margin: 0 auto 24px; display: flex; justify-content: flex-end;">
+    <form method="POST" action="{{ route('logout') }}">
+        @csrf
+        <button type="submit" class="btn btn-secondary">Sign Out</button>
+    </form>
+</div>
+
 <div class="fade-in" style="max-width: 800px; margin: 0 auto 100px;">
     <!-- Update Identity -->
     <section class="studio-card">
@@ -46,7 +53,7 @@
     <!-- Update Password -->
     <section class="studio-card">
         <div class="section-label">
-            <div class="step-number" style="background: var(--secondary)">🔒</div>
+            <div class="step-number" style="background: var(--secondary)"><i class="fa-solid fa-lock"></i></div>
             <h2 class="section-title">Security Update</h2>
         </div>
         <p class="drop-subtext" style="margin-bottom: 32px;">Ensure your account remains secure with a strong password.</p>

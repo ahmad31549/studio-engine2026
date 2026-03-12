@@ -41,8 +41,11 @@ return [
 
     'google' => [
         'client_id' => env('GOOGLE_DRIVE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_DRIVE_CLIENT_SECRET'),
         'api_key' => env('GOOGLE_DRIVE_API_KEY'),
         'app_id' => env('GOOGLE_DRIVE_APP_ID'),
+        'refresh_token' => env('GOOGLE_DRIVE_REFRESH_TOKEN'),
+        'owner_managed' => filter_var(env('GOOGLE_DRIVE_OWNER_MANAGED', false), FILTER_VALIDATE_BOOL),
     ],
 
 ];
