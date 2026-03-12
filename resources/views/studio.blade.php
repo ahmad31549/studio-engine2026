@@ -98,6 +98,9 @@
   50% { opacity: 1; transform: scale(1.05); }
   100% { opacity: 0.6; transform: scale(1); }
 }
+.storage-status-normal { background: #10b981 !important; }
+.storage-status-warning { background: #f59e0b !important; }
+.storage-status-full { background: #ef4444 !important; }
 .step.active .step-label { color: #f97316; }
 .step.completed .step-label { color: #10b981; }
 
@@ -472,6 +475,24 @@
         <p id="errorMessage" class="drop-subtext"></p>
         <button type="button" class="btn btn-secondary" id="retryBtn" style="margin-top: 32px;">Try Again</button>
     </section>
+</div>
+
+<!-- Engine Storage Usage Section -->
+<div class="studio-card fade-in" style="max-width: 1000px; margin: 24px auto 32px; padding: 20px 24px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 24px;">
+        <div style="flex: 1;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 style="margin: 0; font-size: 0.7rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em;">Engine Storage Usage</h3>
+                <span id="storageUsageLabel" style="font-size: 0.85rem; font-weight: 800; color: var(--text-main);">0 GB / 20 GB</span>
+            </div>
+            <div class="progress-track" style="margin: 0; height: 10px; background: rgba(255,255,255,0.05); border-radius: 5px; overflow: hidden;">
+                <div id="storageBarFill" class="progress-bar" style="width: 0%; height: 100%; background: var(--primary); transition: width 0.5s ease, background 0.5s ease;"></div>
+            </div>
+        </div>
+        <button type="button" id="clearMemoryBtn" class="btn btn-secondary" style="height: 52px; padding: 0 24px; display: flex; align-items: center; gap: 10px; border-color: rgba(239, 68, 68, 0.3); color: #ef4444; font-weight: 800; white-space: nowrap; border-radius: 12px;">
+            <span style="font-size: 1.1rem;">🧹</span> CLEAR MEMORY
+        </button>
+    </div>
 </div>
 
 @endsection
