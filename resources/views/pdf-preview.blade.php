@@ -2013,12 +2013,21 @@
         rescale();
         window.addEventListener('resize', rescale);
 
+        const TOAST_DURATION_MS = 4000;
+        let toastTimer = null;
+
         function toast(message, iconClass = 'fa-circle-check') {
             document.getElementById('toastIcon').innerHTML = `<i class="fa-solid ${iconClass}"></i>`;
             document.getElementById('toastMsg').textContent = message;
             const t = document.getElementById('toast');
             t.classList.add('active');
-            setTimeout(() => t.classList.remove('active'), 4000);
+            if (toastTimer) {
+                clearTimeout(toastTimer);
+            }
+            toastTimer = setTimeout(() => {
+                t.classList.remove('active');
+                toastTimer = null;
+            }, TOAST_DURATION_MS);
         }
 
         document.getElementById('downloadBtn').addEventListener('click', async () => {

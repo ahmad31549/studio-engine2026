@@ -3261,12 +3261,21 @@
         });
 
         // ── Notify ───────────────────────────────────────────
+        const TOAST_DURATION_MS = 4000;
+        let toastTimer = null;
+
         function notify(message, iconClass = 'fa-circle-check') {
             const t = document.getElementById('toast');
             document.getElementById('toastIcon').innerHTML = `<i class="fa-solid ${iconClass}"></i>`;
             document.getElementById('toastContent').textContent = message;
             t.classList.add('active');
-            setTimeout(() => t.classList.remove('active'), 4000);
+            if (toastTimer) {
+                clearTimeout(toastTimer);
+            }
+            toastTimer = setTimeout(() => {
+                t.classList.remove('active');
+                toastTimer = null;
+            }, TOAST_DURATION_MS);
         }
 
         bootstrap();

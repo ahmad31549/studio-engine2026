@@ -166,6 +166,9 @@
 @push('scripts')
 <script>
     let activeUserId = null;
+    const TOAST_DURATION_MS = 4000;
+    let activeToast = null;
+    let toastTimer = null;
 
     function openModal(id) {
         activeUserId = id;
@@ -266,6 +269,14 @@
     };
 
     function showToast(message, iconClass = 'fa-circle-check') {
+        if (activeToast) {
+            activeToast.remove();
+        }
+
+        if (toastTimer) {
+            clearTimeout(toastTimer);
+        }
+
         const toast = document.createElement('div');
         const icon = document.createElement('span');
         const text = document.createElement('span');
@@ -278,7 +289,14 @@
         toast.appendChild(icon);
         toast.appendChild(text);
         document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 3000);
+        activeToast = toast;
+        toastTimer = setTimeout(() => {
+            toast.remove();
+            if (activeToast === toast) {
+                activeToast = null;
+            }
+            toastTimer = null;
+        }, TOAST_DURATION_MS);
     }
 </script>
 <style>
