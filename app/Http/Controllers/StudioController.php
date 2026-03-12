@@ -408,22 +408,25 @@ class StudioController extends Controller
                 copy($source['path'], $subDir . '/' . $source['name']);
             }
 
-            $extractedFiles = File::allFiles($subDir);
-            $totalExtracted = count($extractedFiles);
-            $currentExtractedSize = 0;
+            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($subDir, \FilesystemIterator::SKIP_DOTS));
+            $totalExtracted = iterator_count($iterator);
+            $iterator->rewind(); 
             
+            $currentExtractedSize = 0;
+            $lastReportedProgress = -1;
             $authorsInFile = [];
             $renameCandidatesInFile = $this->extractAuthorCandidates($source['name']);
             $renameCandidatesInFile = array_merge($renameCandidatesInFile, $this->extractAuthorCandidates(pathinfo($source['name'], PATHINFO_FILENAME)));
             $assetCount = 0;
 
-            foreach ($extractedFiles as $fIndex => $f) {
+            foreach ($iterator as $fIndex => $f) {
+                if ($f->isDir()) continue;
+                
                 // Sub-progress within this source file
                 $subProgress = ($fIndex / ($totalExtracted ?: 1)) * (90 / ($totalFiles ?: 1));
                 $newProgress = 5 + (int)(($index / ($totalFiles ?: 1)) * 90 + $subProgress);
                 
-                // Only update every 1% change or every 10 files to avoid over-writing job.json
-                if (!isset($lastReportedProgress) || $newProgress > $lastReportedProgress || $fIndex % 10 === 0) {
+                if ($newProgress > $lastReportedProgress) {
                     $this->updateJob($jobId, ['progress' => min(95, $newProgress)]);
                     $lastReportedProgress = $newProgress;
                 }
@@ -692,9 +695,14 @@ class StudioController extends Controller
             $workDir = $this->storagePath . '/' . $jobId . '/temp_' . $index;
             File::copyDirectory($sourceExtractPath, $workDir);
 
-            $allFiles = File::allFiles($workDir);
-            $totalWorkFiles = count($allFiles);
-            foreach ($allFiles as $fIndex => $f) {
+            $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($workDir, \FilesystemIterator::SKIP_DOTS));
+            $totalWorkFiles = iterator_count($iterator);
+            $iterator->rewind();
+            $lastRebrandProgress = -1;
+
+            foreach ($iterator as $fIndex => $f) {
+                if ($f->isDir()) continue;
+                
                 if ($this->shouldRewriteMetadataFile($f)) {
                     $this->rewriteMetadataFile($f->getRealPath(), $authorReplacements);
                 }
@@ -703,7 +711,7 @@ class StudioController extends Controller
                 $subProgress = ($fIndex / ($totalWorkFiles ?: 1)) * (85 / ($total ?: 1));
                 $newProgress = 5 + (int)(($index / ($total ?: 1)) * 85 + $subProgress);
                 
-                if (!isset($lastRebrandProgress) || $newProgress > $lastRebrandProgress || $fIndex % 10 === 0) {
+                if ($newProgress > $lastRebrandProgress) {
                     $this->updateJob($jobId, ['progress' => min(94, $newProgress)]);
                     $lastRebrandProgress = $newProgress;
                 }
@@ -1700,11 +1708,28 @@ PY;
     }
 
     private function updateJob($jobId, $data) {
-        $job = (array)($this->getJob($jobId) ?? []);
-        $job = array_merge($job, $data);
         $path = $this->storagePath . '/' . $jobId . '/job.json';
         if (!file_exists(dirname($path))) @mkdir(dirname($path), 0755, true);
-        file_put_contents($path, json_encode($job, JSON_PRETTY_PRINT));
-        return (object)$job;
+
+        // Atomic write with retry
+        for ($i = 0; $i < 3; $i++) {
+            try {
+                $job = (array)($this->getJob($jobId) ?? []);
+                $job = array_merge($job, $data);
+                $json = json_encode($job, JSON_PRETTY_PRINT);
+                if ($json === false) throw new \Exception("JSON encode failed");
+                
+                $tempPath = $path . '.tmp';
+                if (file_put_contents($tempPath, $json, LOCK_EX) !== false) {
+                    if (rename($tempPath, $path)) {
+                        return (object)$job;
+                    }
+                }
+            } catch (\Exception $e) {
+                usleep(10000); // Wait 10ms
+            }
+        }
+        
+        return (object)(array_merge((array)($this->getJob($jobId) ?? []), $data));
     }
 }
