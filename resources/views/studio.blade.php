@@ -289,9 +289,16 @@
                     <input type="text" id="linkUploadInput" class="text-input" placeholder="https://drive.google.com/..." style="background: rgba(0,0,0,0.3); height: 52px; font-size: 0.85rem;">
                 </div>
                 
-                <button type="button" id="linkUploadBtn" class="btn btn-secondary" style="height: 52px; width: 100%; font-weight: 800; border-color: rgba(249, 115, 22, 0.3); color: var(--primary);">
-                    Download & Import
-                </button>
+                <div style="display: flex; gap: 12px;">
+                    <button type="button" id="linkUploadBtn" class="btn btn-secondary" style="height: 52px; flex: 1; font-weight: 800; border-color: rgba(249, 115, 22, 0.3); color: var(--primary);">
+                        Download & Import
+                    </button>
+                    <button type="button" id="googleDriveBtn" class="btn btn-secondary" style="height: 52px; width: 60px; padding: 0; background: rgba(66, 133, 244, 0.1); border-color: rgba(66, 133, 244, 0.3); color: #4285f4; display: flex; align-items: center; justify-content: center;">
+                        <svg viewBox="0 0 24 24" style="width: 24px; height: 24px; fill: currentColor;">
+                            <path d="M7.74 2L1 14l3.37 6h13.26L23 8h-6.63L7.74 2zM15 8h6.63l-3.37 6H15V8zM5.53 14H15l-3.37 6H4.37L5.53 14z"/>
+                        </svg>
+                    </button>
+                </div>
                 
                 <p class="drop-subtext" style="font-size: 0.65rem; text-align: center; margin-top: 16px; opacity: 0.6;">
                     System will securely fetch the file to the studio node.
@@ -522,6 +529,119 @@
 @push('scripts')
 <script>
     const CONFIGURED_API_BASE = @json(config('services.backend.url'));
+    const GOOGLE_DRIVE_CONFIG = {
+        apiKey: '{{ config("services.google.api_key") }}',
+        clientId: '{{ config("services.google.client_id") }}',
+        appId: '{{ config("services.google.app_id") }}'
+    };
+
+    let pickerApiLoaded = false;
+    let oauthToken = null;
+
+    // Load the Google API Loader script
+    function loadGoogleApi() {
+        const script = document.createElement('script');
+        script.src = 'https://apis.google.com/js/api.js';
+        script.onload = () => gapi.load('picker', {callback: onPickerApiLoad});
+        document.body.appendChild(script);
+
+        const gapiScript = document.createElement('script');
+        gapiScript.src = 'https://accounts.google.com/gsi/client';
+        gapiScript.onload = () => {};
+        document.body.appendChild(gapiScript);
+    }
+
+    function onPickerApiLoad() {
+        pickerApiLoaded = true;
+    }
+
+    function handleDriveAction() {
+        if (!GOOGLE_DRIVE_CONFIG.clientId || !GOOGLE_DRIVE_CONFIG.apiKey) {
+            alert("Google Drive is not fully configured. Please set GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_API_KEY in .env");
+            return;
+        }
+
+        const tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_DRIVE_CONFIG.clientId,
+            scope: 'https://www.googleapis.com/auth/drive.readonly',
+            callback: (response) => {
+                if (response.error !== undefined) throw (response);
+                oauthToken = response.access_token;
+                createPicker();
+            },
+        });
+
+        if (oauthToken === null) {
+            tokenClient.requestAccessToken({prompt: 'consent'});
+        } else {
+            tokenClient.requestAccessToken({prompt: ''});
+        }
+    }
+
+    function createPicker() {
+        if (pickerApiLoaded && oauthToken) {
+            const view = new google.picker.View(google.picker.ViewId.DOCS);
+            view.setMimeTypes("application/zip,application/x-zip-compressed,application/octet-stream");
+            const picker = new google.picker.PickerBuilder()
+                .enableFeature(google.picker.Feature.NAV_HIDDEN)
+                .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+                .setAppId(GOOGLE_DRIVE_CONFIG.appId)
+                .setOAuthToken(oauthToken)
+                .addView(view)
+                .addView(new google.picker.DocsUploadView())
+                .setDeveloperKey(GOOGLE_DRIVE_CONFIG.apiKey)
+                .setCallback(pickerCallback)
+                .build();
+            picker.setVisible(true);
+        }
+    }
+
+    async function pickerCallback(data) {
+        if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
+            const doc = data[google.picker.Response.DOCUMENTS][0];
+            const fileId = doc[google.picker.Document.ID];
+            
+            // Send File ID to backend to handle download via API
+            state.status = 'uploading';
+            updateView();
+            
+            if (elements.stageTitle) elements.stageTitle.innerText = "Connecting Google Drive...";
+            if (elements.stageMessage) elements.stageMessage.innerText = "Securely fetching \"" + doc.name + "\" from your cloud storage.";
+
+            try {
+                pollStatus();
+                const response = await apiFetch('/upload-url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_id: fileId, token: oauthToken })
+                });
+
+                if (!response.ok) {
+                    clearInterval(pollInterval);
+                    state.status = 'error';
+                    elements.errorMessage.innerText = await readErrorMessage(response, 'Google Drive import failed');
+                    updateView();
+                    return;
+                }
+
+                const resData = await response.json();
+                state.jobId = resData.job_id;
+                state.status = 'uploaded';
+                updateView();
+            } catch (error) {
+                clearInterval(pollInterval);
+                state.status = 'error';
+                elements.errorMessage.innerText = error.message || 'Drive fetch request failed';
+                updateView();
+            }
+        }
+    }
+
+    // Initialize Google API loading
+    document.addEventListener('DOMContentLoaded', loadGoogleApi);
+
+    const googleDriveBtn = document.getElementById('googleDriveBtn');
+    if (googleDriveBtn) googleDriveBtn.onclick = handleDriveAction;
     const normalizeBase = (value) => value ? value.replace(/\/$/, '') : '';
     const shouldRetryWithFallback = (status) => [404, 500, 502, 503, 504].includes(status);
 

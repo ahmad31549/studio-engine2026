@@ -39,4 +39,10 @@ return [
         'url' => rtrim((string) env('BACKEND_API_URL', env('VITE_API_BASE', 'http://127.0.0.1:8000')), '/'),
     ],
 
+    'google' => [
+        'client_id' => env('GOOGLE_DRIVE_CLIENT_ID'),
+        'api_key' => env('GOOGLE_DRIVE_API_KEY'),
+        'app_id' => env('GOOGLE_DRIVE_APP_ID'),
+    ],
+
 ];

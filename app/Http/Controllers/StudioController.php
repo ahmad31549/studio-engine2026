@@ -230,6 +230,9 @@ class StudioController extends Controller
     /**
      * Handle cloud URL import
      */
+    /**
+     * Handle cloud URL import
+     */
     public function uploadUrl(Request $request)
     {
         if (!$this->checkStorageLimit()) {
@@ -237,7 +240,12 @@ class StudioController extends Controller
         }
 
         $url = $request->input('url');
-        if (!$url) return response()->json(['error' => 'URL is required'], 400);
+        $fileId = $request->input('file_id'); // Support direct File ID from Picker
+        $token = $request->input('token'); // Support OAuth token for private files
+
+        if (!$url && !$fileId) {
+            return response()->json(['error' => 'URL or File ID is required'], 400);
+        }
 
         $jobId = (string) Str::uuid();
         $jobDir = $this->storagePath . '/' . $jobId . '/input';
@@ -246,6 +254,11 @@ class StudioController extends Controller
         try {
             $filename = "cloud_import.zip";
             
+            if ($fileId) {
+                return $this->downloadFromGoogleDriveApi($fileId, $jobId, $jobDir, $token);
+            }
+
+            // Fallback to legacy URL parsing if no API fileId provided
             // 1. HEAD request to check size before downloading
             $headResponse = Http::timeout(10)->head($url);
             $contentLength = $headResponse->header('Content-Length');
@@ -255,6 +268,12 @@ class StudioController extends Controller
 
             if (preg_match('/(?:drive\.google\.com\/(?:file\/d\/|open\?id=)|docs\.google\.com\/uc\?id=)([\w-]+)/', $url, $matches)) {
                 $fileId = $matches[1];
+                
+                // If we have API config, use it even for pasted links for better reliability
+                if (env('GOOGLE_DRIVE_API_KEY')) {
+                    return $this->downloadFromGoogleDriveApi($fileId, $jobId, $jobDir, $token);
+                }
+
                 $downloadUrl = "https://docs.google.com/uc?export=download&id=" . $fileId;
                 $response = Http::timeout(180)->get($downloadUrl);
                 
@@ -296,6 +315,61 @@ class StudioController extends Controller
 
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 400);
+        }
+    }
+
+    private function downloadFromGoogleDriveApi($fileId, $jobId, $jobDir, $token = null)
+    {
+        $apiKey = env('GOOGLE_DRIVE_API_KEY');
+        if (!$apiKey && !$token) {
+            throw new \Exception("Google Drive API is not configured (Missing API Key or Token).");
+        }
+
+        try {
+            $client = Http::timeout(300);
+            if ($token) {
+                $client->withToken($token);
+                $metaUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}";
+                $contentUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}?alt=media";
+            } else {
+                $metaUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}?key={$apiKey}";
+                $contentUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}?alt=media&key={$apiKey}";
+            }
+
+            // First get Metadata
+            $metaResponse = $client->get($metaUrl);
+            if (!$metaResponse->successful()) {
+                throw new \Exception("Failed to fetch file metadata from Google API: " . $metaResponse->body());
+            }
+            $meta = $metaResponse->json();
+            $filename = $meta['name'] ?? "google_drive_file.zip";
+            
+            $filePath = $jobDir . '/' . $filename;
+            
+            // Stream content to sink
+            $response = $client->withOptions([
+                'sink' => $filePath
+            ])->get($contentUrl);
+
+            if (!$response->successful()) {
+                throw new \Exception("Google Drive API download failed. Status: " . $response->status());
+            }
+
+            $this->updateJob($jobId, [
+                'job_id' => $jobId,
+                'user_id' => Auth::id(),
+                'status' => 'uploaded',
+                'files' => [[
+                    'name' => $filename,
+                    'path' => $filePath,
+                    'size' => filesize($filePath)
+                ]],
+                'progress' => 0
+            ]);
+
+            return response()->json(['job_id' => $jobId, 'status' => 'uploaded']);
+        } catch (\Exception $e) {
+            throw $e;
         }
     }
 
