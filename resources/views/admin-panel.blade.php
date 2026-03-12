@@ -52,8 +52,8 @@
                                 </div>
                                 <div>
                                     <div style="font-weight: 700; font-size: 1rem; color: var(--text-main);">
-                                        {{ $user->name }} 
-                                        @if($user->is_admin) 
+                                        {{ $user->name }}
+                                        @if($user->is_admin)
                                             <span class="badge" style="font-size: 0.6rem; padding: 2px 8px; margin-left: 6px; background: var(--primary); color: #000; border: none;">Admin</span>
                                         @endif
                                     </div>
@@ -63,9 +63,9 @@
                         </td>
                         <td style="padding: 24px 32px;">
                             <select onchange="updateStatus({{ $user->id }}, this.value)" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; outline: none;">
-                                <option value="pending" {{ $user->status === 'pending' ? 'selected' : '' }}><i class="fa-solid fa-hourglass-half"></i> Pending</option>
-                                <option value="approved" {{ $user->status === 'approved' ? 'selected' : '' }}><i class="fa-solid fa-circle-check"></i> Approved</option>
-                                <option value="rejected" {{ $user->status === 'rejected' ? 'selected' : '' }}><i class="fa-solid fa-circle-xmark"></i> Rejected</option>
+                                <option value="pending" {{ $user->status === 'pending' ? 'selected' : '' }}>Pending</option>
+                                <option value="approved" {{ $user->status === 'approved' ? 'selected' : '' }}>Approved</option>
+                                <option value="rejected" {{ $user->status === 'rejected' ? 'selected' : '' }}>Rejected</option>
                             </select>
                         </td>
                         <td style="padding: 24px 32px;">
@@ -73,15 +73,15 @@
                                 @php
                                     $tools = [
                                         ['id' => 'procreate_studio', 'label' => 'Procreate', 'color' => 'var(--primary)'],
-                                        ['id' => 'pdf_lab', 'label' => 'PDF Lab', 'color' => 'var(--secondary)']
+                                        ['id' => 'pdf_lab', 'label' => 'PDF Lab', 'color' => 'var(--secondary)'],
                                     ];
                                 @endphp
                                 @foreach($tools as $tool)
                                     <label style="display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.05); padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border-color); cursor: pointer; transition: all 0.3s;" onmouseover="this.style.borderColor='{{ $tool['color'] }}'" onmouseout="this.style.borderColor='var(--border-color)'">
-                                        <input type="checkbox" 
-                                               onchange="updateToolAccess({{ $user->id }})" 
-                                               class="tool-checkbox-{{ $user->id }}" 
-                                               value="{{ $tool['id'] }}" 
+                                        <input type="checkbox"
+                                               onchange="updateToolAccess({{ $user->id }})"
+                                               class="tool-checkbox-{{ $user->id }}"
+                                               value="{{ $tool['id'] }}"
                                                {{ $user->hasExplicitToolAccess($tool['id']) ? 'checked' : '' }}
                                                style="accent-color: {{ $tool['color'] }}; width: 14px; height: 14px;">
                                         <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">{{ $tool['label'] }}</span>
@@ -113,16 +113,14 @@
     </div>
 </div>
 
-<!-- Modal Background -->
 <div id="modalBackdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center; padding: 24px;">
-    <!-- Reset Password Modal -->
     <div id="passwordModal" class="studio-card fade-in" style="width: min(100%, 450px); margin: 0; display: none;">
         <div class="section-label">
             <div class="step-number"><i class="fa-solid fa-key"></i></div>
             <h2 class="section-title">Reset User Password</h2>
         </div>
         <p class="drop-subtext" style="margin-bottom: 24px;">Enter a new security credential for this member.</p>
-        
+
         <div class="control-group">
             <label class="control-label">New Password</label>
             <input type="password" id="newPasswordInput" class="text-input" placeholder="Min 8 characters">
@@ -192,8 +190,8 @@
                 body: JSON.stringify({ status })
             });
             const data = await resp.json();
-            if(data.success) {
-                showToast('<i class="fa-solid fa-circle-check"></i> Status updated successfully');
+            if (data.success) {
+                showToast('Status updated successfully', 'fa-circle-check');
             } else {
                 alert(data.message || 'Error updating status');
             }
@@ -205,9 +203,9 @@
 
     async function updateToolAccess(userId) {
         const checkboxes = document.querySelectorAll(`.tool-checkbox-${userId}`);
-        const tool_access = Array.from(checkboxes)
-            .filter(i => i.checked)
-            .map(i => i.value);
+        const toolAccess = Array.from(checkboxes)
+            .filter((input) => input.checked)
+            .map((input) => input.value);
 
         try {
             const resp = await fetch(`/admin/users/${userId}/tool-access`, {
@@ -216,11 +214,11 @@
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': '{{ csrf_token() }}'
                 },
-                body: JSON.stringify({ tool_access })
+                body: JSON.stringify({ tool_access: toolAccess })
             });
             const data = await resp.json();
-            if(data.success) {
-                showToast('🔓 Tool permissions synchronized');
+            if (data.success) {
+                showToast('Tool permissions synchronized', 'fa-unlock');
             } else {
                 alert(data.message || 'Error updating access');
             }
@@ -252,8 +250,8 @@
                 body: JSON.stringify({ password })
             });
             const data = await resp.json();
-            if(data.success) {
-                showToast('<i class="fa-solid fa-key"></i> Password changed');
+            if (data.success) {
+                showToast('Password changed', 'fa-key');
                 closeModal();
             } else {
                 alert(data.message || 'Error resetting password');
@@ -267,12 +265,18 @@
         }
     };
 
-    function showToast(msg) {
-        // Simple notification (or use your existing toast system)
-        console.log(msg);
+    function showToast(message, iconClass = 'fa-circle-check') {
         const toast = document.createElement('div');
-        toast.style.cssText = 'position:fixed; bottom:30px; left:50%; transform:translateX(-50%); background:var(--primary); color:#000; padding:12px 24px; border-radius:12px; font-weight:800; z-index:100000; box-shadow:0 10px 30px rgba(0,0,0,0.5); animation:slideUp 0.3s ease-out;';
-        toast.innerText = msg;
+        const icon = document.createElement('span');
+        const text = document.createElement('span');
+
+        toast.style.cssText = 'position:fixed; bottom:30px; left:50%; transform:translateX(-50%); background:var(--primary); color:#000; padding:14px 22px; border-radius:14px; font-weight:800; z-index:100000; box-shadow:0 10px 30px rgba(0,0,0,0.5); animation:slideUp 0.3s ease-out; display:flex; align-items:center; justify-content:center; gap:12px; min-width:min(520px, calc(100vw - 32px));';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.innerHTML = `<i class="fa-solid ${iconClass}"></i>`;
+        text.textContent = message;
+
+        toast.appendChild(icon);
+        toast.appendChild(text);
         document.body.appendChild(toast);
         setTimeout(() => toast.remove(), 3000);
     }
