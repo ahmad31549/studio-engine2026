@@ -837,8 +837,8 @@
         return formData;
     }
 
-    const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB chunks balance request overhead with smoother parallel uploads
-    const MAX_PARALLEL_UPLOADS = 4;
+    const CHUNK_SIZE = 12 * 1024 * 1024; // 12MB chunks reduce PHP overhead while staying stable on shared hosting
+    const MAX_PARALLEL_UPLOADS = 6;
     const CHUNK_UPLOAD_RETRY_LIMIT = 2;
 
     function updateUploadProgressUI(currentUploaded, totalSize, completedFiles, totalFiles, startTime) {

@@ -446,6 +446,7 @@ class StudioController extends Controller
             $this->assembleChunkedUploads($jobDir);
         } catch (\Throwable $e) {
             Log::warning("Chunk assembly failed for job {$jobId}: " . $e->getMessage());
+            $this->cleanupChunkUploadArtifacts($jobDir);
 
             return response()->json([
                 'error' => 'Upload assembly failed.',
@@ -630,6 +631,12 @@ class StudioController extends Controller
                         fclose($input);
                     }
                 }
+            } catch (\Throwable $e) {
+                if (is_file($finalPath)) {
+                    @unlink($finalPath);
+                }
+
+                throw $e;
             } finally {
                 fclose($out);
             }
@@ -637,7 +644,7 @@ class StudioController extends Controller
             File::deleteDirectory($chunkDir);
         }
 
-        File::deleteDirectory($chunksRoot);
+        $this->cleanupChunkUploadArtifacts($jobDir);
     }
 
     private function chunkUploadDirectory(string $jobDir, string $fileKey): string
@@ -647,6 +654,14 @@ class StudioController extends Controller
             . '.chunks'
             . DIRECTORY_SEPARATOR
             . preg_replace('/[^A-Za-z0-9._-]/', '_', $fileKey);
+    }
+
+    private function cleanupChunkUploadArtifacts(string $jobDir): void
+    {
+        $chunksRoot = $jobDir . DIRECTORY_SEPARATOR . '.chunks';
+        if (File::isDirectory($chunksRoot)) {
+            File::deleteDirectory($chunksRoot);
+        }
     }
 
     /**
