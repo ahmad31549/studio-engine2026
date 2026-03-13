@@ -840,8 +840,12 @@
     const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB chunks keep shared-host uploads steadier than oversized requests
     const MAX_PARALLEL_UPLOADS = 4;
     const CHUNK_UPLOAD_RETRY_LIMIT = 2;
+    const UPLOAD_UI_UPDATE_INTERVAL_MS = 120;
+    let pendingUploadProgressState = null;
+    let uploadUiUpdateTimeout = null;
+    let lastUploadUiCommitAt = 0;
 
-    function updateUploadProgressUI(currentUploaded, totalSize, completedFiles, totalFiles, startTime) {
+    function renderUploadProgressUI(currentUploaded, totalSize, completedFiles, totalFiles, startTime) {
         const safeTotal = Math.max(totalSize || 0, 1);
         const percent = Math.min(99, Math.round((currentUploaded / safeTotal) * 100));
 
@@ -865,6 +869,61 @@
                 elements.statEta.innerText = "Finishing...";
             }
         }
+    }
+
+    function flushUploadProgressUI() {
+        if (!pendingUploadProgressState) {
+            return;
+        }
+
+        const next = pendingUploadProgressState;
+        pendingUploadProgressState = null;
+        lastUploadUiCommitAt = Date.now();
+
+        renderUploadProgressUI(
+            next.currentUploaded,
+            next.totalSize,
+            next.completedFiles,
+            next.totalFiles,
+            next.startTime
+        );
+    }
+
+    function updateUploadProgressUI(currentUploaded, totalSize, completedFiles, totalFiles, startTime, force = false) {
+        pendingUploadProgressState = {
+            currentUploaded,
+            totalSize,
+            completedFiles,
+            totalFiles,
+            startTime,
+        };
+
+        if (force) {
+            if (uploadUiUpdateTimeout) {
+                clearTimeout(uploadUiUpdateTimeout);
+                uploadUiUpdateTimeout = null;
+            }
+            flushUploadProgressUI();
+            return;
+        }
+
+        if ((Date.now() - lastUploadUiCommitAt) >= UPLOAD_UI_UPDATE_INTERVAL_MS) {
+            if (uploadUiUpdateTimeout) {
+                clearTimeout(uploadUiUpdateTimeout);
+                uploadUiUpdateTimeout = null;
+            }
+            flushUploadProgressUI();
+            return;
+        }
+
+        if (uploadUiUpdateTimeout) {
+            return;
+        }
+
+        uploadUiUpdateTimeout = setTimeout(() => {
+            uploadUiUpdateTimeout = null;
+            flushUploadProgressUI();
+        }, UPLOAD_UI_UPDATE_INTERVAL_MS);
     }
 
     function createChunkUploadFileKey(file, fileIndex) {
@@ -998,7 +1057,7 @@
 
             uploadedBytes += file.size;
             completedFiles += 1;
-            updateUploadProgressUI(uploadedBytes, totalSize, completedFiles, files.length, startTime);
+            updateUploadProgressUI(uploadedBytes, totalSize, completedFiles, files.length, startTime, true);
 
             uploadedDriveFiles.push({
                 id: payload.id,
@@ -1175,7 +1234,7 @@
         });
 
         await Promise.all(workers);
-        updateUploadProgressUI(committedBytes, totalSize, completedFiles, files.length, startTime);
+        updateUploadProgressUI(committedBytes, totalSize, completedFiles, files.length, startTime, true);
 
         // Finalize
         const finalizeResp = await apiFetch('/finalize-upload', {
