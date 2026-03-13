@@ -562,7 +562,8 @@ class StudioController extends Controller
             'updated_at' => now()->toIso8601String(),
         ];
 
-        if (file_put_contents($manifestPath, json_encode($manifest, JSON_PRETTY_PRINT), LOCK_EX) === false) {
+        $manifestJson = json_encode($this->sanitizeForJson($manifest), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($manifestJson === false || file_put_contents($manifestPath, $manifestJson, LOCK_EX) === false) {
             throw new \RuntimeException('Failed to write chunk manifest.');
         }
 
@@ -1030,197 +1031,309 @@ class StudioController extends Controller
     public function scan(Request $request, $jobId)
     {
         $job = $this->getJob($jobId);
-        if (!$job) return response()->json(['error' => 'Job not found'], 404);
-        $scanStartedAt = microtime(true);
+        if (!$job) return $this->jsonResponseSafe(['error' => 'Job not found'], 404);
 
-        $extractRoot = $this->storagePath . '/' . $jobId . '/work';
-        Log::info("Scan starting. Extraction root: {$extractRoot}");
-        if (file_exists($extractRoot)) {
-            File::deleteDirectory($extractRoot);
-        }
-        mkdir($extractRoot, 0755, true);
+        $sourceFiles = is_array($job->files ?? null) ? $job->files : [];
+        $safeTotalFiles = max(count($sourceFiles), 1);
+        $initialMeta = [
+            'phase' => 'scan',
+            'total_files' => $safeTotalFiles,
+            'completed_files' => 0,
+            'current_file_index' => 1,
+            'current_file_name' => $sourceFiles[0]['name'] ?? 'Package',
+            'assets_found' => 0,
+            'detected_authors' => 0,
+            'elapsed_seconds' => 0,
+        ];
 
-        $this->updateJob($jobId, [
-            'status' => 'scanning',
-            'progress' => 2,
-            'progress_message' => 'Initializing intelligent scan...'
-        ]);
-
-        $manifest = ['assets' => [], 'source_files' => [], 'detected_authors' => [], 'rename_candidates' => []];
-        $allAuthorTags = [];
-        $allRenameCandidates = [];
-        $totalExtractedSize = 0;
-        $toolExts = ['brushset', 'brush', 'procreate', 'swatches', 'usdz'];
-        $imgExts = ['png', 'jpg', 'jpeg', 'webp'];
-
-        $sourceFiles = $job->files ?: [];
-        $totalFiles = count($sourceFiles);
-        $safeTotalFiles = max($totalFiles, 1);
-
-        foreach ($sourceFiles as $index => $source) {
-            $currentProgress = 5 + (int)(($index / ($totalFiles ?: 1)) * 90);
+        if (!$request->boolean('_background')) {
             $this->updateJob($jobId, [
-                'progress' => $currentProgress,
-                'progress_message' => "Scanning " . ($index + 1) . "/$totalFiles: " . $source['name'],
+                'status' => 'scanning',
+                'progress' => 2,
+                'progress_message' => 'Initializing intelligent scan...',
+                'progress_meta' => $initialMeta,
+                'error' => null,
+                'error_detail' => null,
+                'error_reason_code' => null,
+            ]);
+
+            $backgroundRequest = $request->duplicate(
+                $request->query->all(),
+                $request->request->all(),
+                $request->attributes->all(),
+                $request->cookies->all(),
+                $request->files->all(),
+                $request->server->all()
+            );
+            $backgroundRequest->request->set('_background', '1');
+
+            $userId = Auth::id();
+            app()->terminating(function () use ($backgroundRequest, $jobId, $userId): void {
+                try {
+                    if ($userId) {
+                        Auth::onceUsingId($userId);
+                    }
+
+                    $this->scan($backgroundRequest, $jobId);
+                } catch (\Throwable $e) {
+                    Log::error("Scan bootstrap failed for job {$jobId}: " . $e->getMessage(), [
+                        'exception' => $e,
+                    ]);
+
+                    $failure = $this->buildStudioFailurePayload('scan', $e);
+                    $this->updateJob($jobId, [
+                        'status' => 'failed',
+                        'error' => $failure['error'],
+                        'error_detail' => $failure['detail'],
+                        'error_reason_code' => $failure['reason_code'],
+                        'progress_message' => 'Scan failed.',
+                        'progress_meta' => array_merge($initialMeta, [
+                            'reason_code' => $failure['reason_code'],
+                        ]),
+                    ]);
+                }
+            });
+
+            return $this->jsonResponseSafe([
+                'status' => 'scanning',
+                'progress' => 2,
+                'progress_message' => 'Initializing intelligent scan...',
+                'progress_meta' => $initialMeta,
+            ], 202);
+        }
+
+        @set_time_limit(600);
+        @ignore_user_abort(true);
+
+        $scanStartedAt = microtime(true);
+        $currentSourceName = $initialMeta['current_file_name'];
+
+        try {
+            $extractRoot = $this->storagePath . '/' . $jobId . '/work';
+            Log::info("Scan starting. Extraction root: {$extractRoot}");
+            if (file_exists($extractRoot)) {
+                File::deleteDirectory($extractRoot);
+            }
+            mkdir($extractRoot, 0755, true);
+
+            $this->updateJob($jobId, [
+                'status' => 'scanning',
+                'progress' => 2,
+                'progress_message' => 'Initializing intelligent scan...',
+                'progress_meta' => $initialMeta,
+                'error' => null,
+                'error_detail' => null,
+                'error_reason_code' => null,
+            ]);
+
+            $manifest = ['assets' => [], 'source_files' => [], 'detected_authors' => [], 'rename_candidates' => []];
+            $allAuthorTags = [];
+            $allRenameCandidates = [];
+            $totalExtractedSize = 0;
+            $toolExts = ['brushset', 'brush', 'procreate', 'swatches', 'usdz'];
+            $imgExts = ['png', 'jpg', 'jpeg', 'webp'];
+            $totalFiles = count($sourceFiles);
+
+            foreach ($sourceFiles as $index => $source) {
+                $currentSourceName = (string) ($source['name'] ?? 'Package');
+                $currentProgress = 5 + (int) (($index / ($totalFiles ?: 1)) * 90);
+                $this->updateJob($jobId, [
+                    'progress' => $currentProgress,
+                    'progress_message' => "Scanning " . ($index + 1) . "/$totalFiles: " . $currentSourceName,
+                    'progress_meta' => [
+                        'phase' => 'scan',
+                        'total_files' => $safeTotalFiles,
+                        'completed_files' => $index,
+                        'current_file_index' => $index + 1,
+                        'current_file_name' => $currentSourceName,
+                        'assets_found' => count($manifest['assets']),
+                        'detected_authors' => count($this->uniqueValues($allAuthorTags)),
+                        'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
+                    ],
+                ]);
+
+                $subDir = $extractRoot . '/' . pathinfo($currentSourceName, PATHINFO_FILENAME);
+                if (!file_exists($subDir)) mkdir($subDir, 0755, true);
+
+                $sourcePath = (string) ($source['path'] ?? '');
+                if ($sourcePath === '' || !File::exists($sourcePath)) {
+                    throw new \RuntimeException("Source file is missing: {$currentSourceName}");
+                }
+
+                $isZip = false;
+                $zip = new ZipArchive;
+                if ($zip->open($sourcePath) === true) {
+                    if ($zip->extractTo($subDir) !== true) {
+                        $zip->close();
+                        throw new \RuntimeException("The archive could not be extracted: {$currentSourceName}");
+                    }
+                    $zip->close();
+                    $isZip = true;
+                } else {
+                    if (!@copy($sourcePath, $subDir . '/' . basename($currentSourceName))) {
+                        throw new \RuntimeException("The source file could not be prepared for scanning: {$currentSourceName}");
+                    }
+                }
+
+                if (!File::exists($subDir)) {
+                    throw new \RuntimeException("The extracted scan folder is missing: {$currentSourceName}");
+                }
+
+                try {
+                    $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($subDir, \FilesystemIterator::SKIP_DOTS));
+                    $totalExtracted = iterator_count($iterator);
+                    $iterator->rewind();
+                } catch (\Throwable $e) {
+                    throw new \RuntimeException("Failed to inspect extracted files for {$currentSourceName}", previous: $e);
+                }
+
+                $currentExtractedSize = 0;
+                $lastReportedProgress = -1;
+                $authorsInFile = [];
+                $renameCandidatesInFile = $this->extractAuthorCandidates($currentSourceName);
+                $renameCandidatesInFile = array_merge($renameCandidatesInFile, $this->extractAuthorCandidates(pathinfo($currentSourceName, PATHINFO_FILENAME)));
+                $assetCount = 0;
+
+                $counter = 0;
+                foreach ($iterator as $f) {
+                    if ($f->isDir()) continue;
+
+                    $subProgress = ($counter / ($totalExtracted ?: 1)) * (90 / ($totalFiles ?: 1));
+                    $newProgress = 5 + (int) (($index / ($totalFiles ?: 1)) * 90 + $subProgress);
+
+                    if ($newProgress > $lastReportedProgress) {
+                        $this->updateJob($jobId, [
+                            'progress' => min(95, $newProgress),
+                            'progress_meta' => [
+                                'phase' => 'scan',
+                                'total_files' => $safeTotalFiles,
+                                'completed_files' => $index,
+                                'current_file_index' => $index + 1,
+                                'current_file_name' => $currentSourceName,
+                                'assets_found' => count($manifest['assets']) + $assetCount,
+                                'detected_authors' => count($this->uniqueValues(array_merge($allAuthorTags, $authorsInFile))),
+                                'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
+                            ],
+                        ]);
+                        $lastReportedProgress = $newProgress;
+                    }
+                    $counter++;
+
+                    $currentExtractedSize += $f->getSize();
+                    $realPath = $f->getRealPath();
+                    if (!is_string($realPath) || $realPath === '') {
+                        continue;
+                    }
+
+                    $name = $f->getFilename();
+                    $ext = strtolower($f->getExtension());
+                    $rel = $this->normalizeManifestPath($extractRoot, $realPath);
+
+                    $renameCandidatesInFile = array_merge($renameCandidatesInFile, $this->extractAuthorCandidates($rel));
+
+                    if (in_array($ext, $imgExts, true) || in_array($ext, $toolExts, true)) {
+                        if ($isZip || $name !== $currentSourceName) {
+                            $manifest['assets'][] = [
+                                'name' => $name,
+                                'rel_path' => $rel,
+                                'size' => $f->getSize(),
+                                'source_name' => $currentSourceName,
+                                'category' => $this->classifyAsset($name),
+                            ];
+                            $assetCount++;
+                        }
+                    }
+
+                    if ($name === 'Data' || $ext === 'plist' || $ext === 'archive' || in_array($ext, $toolExts, true)) {
+                        $content = @file_get_contents($realPath);
+                        if ($content !== false && $content !== '') {
+                            $authorsInFile = array_merge($authorsInFile, $this->extractAuthorCandidates($content));
+                            $authorsInFile = array_merge($authorsInFile, $this->extractBinaryPlistAuthorCandidates($content));
+                        }
+                    }
+                }
+
+                $totalExtractedSize += $currentExtractedSize;
+
+                if ($totalExtractedSize > 10737418240) {
+                    throw new \RuntimeException('Total content exceeds 10GB limit.');
+                }
+
+                $authorsInFile = $this->uniqueValues($authorsInFile);
+                $renameCandidatesInFile = $this->uniqueValues(array_merge($renameCandidatesInFile, $authorsInFile));
+                $allAuthorTags = array_merge($allAuthorTags, $authorsInFile);
+                $allRenameCandidates = array_merge($allRenameCandidates, $renameCandidatesInFile);
+
+                $manifest['source_files'][] = [
+                    'name' => $currentSourceName,
+                    'size' => (int) ($source['size'] ?? 0),
+                    'asset_count' => $assetCount,
+                    'author_tags' => $authorsInFile,
+                ];
+            }
+
+            $manifest['detected_authors'] = $this->uniqueValues($allAuthorTags);
+            $manifest['rename_candidates'] = $this->uniqueValues($allRenameCandidates);
+            $manifest = $this->sanitizeForJson($manifest);
+
+            Log::info("Job {$jobId} scan complete. Found " . count($manifest['assets']) . " assets and " . count($manifest['detected_authors']) . " author tags.");
+
+            $progressMeta = [
+                'phase' => 'scan',
+                'total_files' => $safeTotalFiles,
+                'completed_files' => $safeTotalFiles,
+                'current_file_index' => $safeTotalFiles,
+                'current_file_name' => $sourceFiles[$totalFiles - 1]['name'] ?? 'Package',
+                'assets_found' => count($manifest['assets']),
+                'detected_authors' => count($manifest['detected_authors']),
+                'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
+            ];
+
+            $this->updateJob($jobId, [
+                'status' => 'scanned',
+                'manifest' => $manifest,
+                'progress' => 100,
+                'progress_message' => 'Scan complete. Review detected assets before rebrand.',
+                'progress_meta' => $progressMeta,
+                'error' => null,
+                'error_detail' => null,
+                'error_reason_code' => null,
+            ]);
+
+            return $this->jsonResponseSafe([
+                'status' => 'scanned',
+                'manifest' => $manifest,
+                'progress_meta' => $progressMeta,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error("Scan failed for job {$jobId}: " . $e->getMessage(), [
+                'exception' => $e,
+                'current_source_name' => $currentSourceName,
+            ]);
+
+            $failure = $this->buildStudioFailurePayload('scan', $e, [
+                'current_file_name' => $currentSourceName,
+            ]);
+
+            $this->updateJob($jobId, [
+                'status' => 'failed',
+                'error' => $failure['error'],
+                'error_detail' => $failure['detail'],
+                'error_reason_code' => $failure['reason_code'],
+                'progress_message' => 'Scan failed.',
                 'progress_meta' => [
                     'phase' => 'scan',
                     'total_files' => $safeTotalFiles,
-                    'completed_files' => $index,
-                    'current_file_index' => $index + 1,
-                    'current_file_name' => $source['name'],
-                    'assets_found' => count($manifest['assets']),
-                    'detected_authors' => count($this->uniqueValues($allAuthorTags)),
+                    'completed_files' => 0,
+                    'current_file_index' => 1,
+                    'current_file_name' => $failure['current_file_name'] ?? $currentSourceName,
                     'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
+                    'reason_code' => $failure['reason_code'],
                 ],
             ]);
 
-            $subDir = $extractRoot . '/' . pathinfo($source['name'], PATHINFO_FILENAME);
-            if (!file_exists($subDir)) mkdir($subDir, 0755, true);
-
-            $isZip = false;
-            $zip = new ZipArchive;
-            if ($zip->open($source['path']) === TRUE) {
-                $zip->extractTo($subDir);
-                $zip->close();
-                $isZip = true;
-            } else {
-                // If not a zip, copy the file itself to subDir so it can be "found" by allFiles
-                copy($source['path'], $subDir . '/' . $source['name']);
-            }
-
-            if (!File::exists($subDir)) {
-                Log::warning("Scanning subDir missing for job {$jobId}: {$subDir}");
-                continue;
-            }
-
-            try {
-                $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($subDir, \FilesystemIterator::SKIP_DOTS));
-                $totalExtracted = iterator_count($iterator);
-                $iterator->rewind(); 
-            } catch (\Exception $e) {
-                Log::error("Failed to iterate scan directory for job {$jobId}: " . $e->getMessage());
-                continue;
-            }
-            
-            $currentExtractedSize = 0;
-            $lastReportedProgress = -1;
-            $authorsInFile = [];
-            $renameCandidatesInFile = $this->extractAuthorCandidates($source['name']);
-            $renameCandidatesInFile = array_merge($renameCandidatesInFile, $this->extractAuthorCandidates(pathinfo($source['name'], PATHINFO_FILENAME)));
-            $assetCount = 0;
-
-            $counter = 0;
-            foreach ($iterator as $f) {
-                if ($f->isDir()) continue;
-                
-                // Sub-progress within this source file
-                $subProgress = ($counter / ($totalExtracted ?: 1)) * (90 / ($totalFiles ?: 1));
-                $newProgress = 5 + (int)(($index / ($totalFiles ?: 1)) * 90 + $subProgress);
-                
-                if ($newProgress > $lastReportedProgress) {
-                    $this->updateJob($jobId, [
-                        'progress' => min(95, $newProgress),
-                        'progress_meta' => [
-                            'phase' => 'scan',
-                            'total_files' => $safeTotalFiles,
-                            'completed_files' => $index,
-                            'current_file_index' => $index + 1,
-                            'current_file_name' => $source['name'],
-                            'assets_found' => count($manifest['assets']) + $assetCount,
-                            'detected_authors' => count($this->uniqueValues(array_merge($allAuthorTags, $authorsInFile))),
-                            'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
-                        ],
-                    ]);
-                    $lastReportedProgress = $newProgress;
-                }
-                $counter++;
-
-                $currentExtractedSize += $f->getSize();
-                $realPath = $f->getRealPath();
-                $name = $f->getFilename();
-                $ext = strtolower($f->getExtension());
-                $rel = $this->normalizeManifestPath($extractRoot, $realPath);
-
-                $renameCandidatesInFile = array_merge($renameCandidatesInFile, $this->extractAuthorCandidates($rel));
-
-                if (in_array($ext, $imgExts) || in_array($ext, $toolExts)) {
-                    if ($isZip || $name !== $source['name']) {
-                        $manifest['assets'][] = [
-                            'name' => $name,
-                            'rel_path' => $rel,
-                            'size' => $f->getSize(),
-                            'source_name' => $source['name'],
-                            'category' => $this->classifyAsset($name)
-                        ];
-                        $assetCount++;
-                    }
-                }
-
-                // DEEP SCAN for Author Metadata
-                if ($name === 'Data' || $ext === 'plist' || $ext === 'archive' || in_array($ext, $toolExts)) {
-                    $content = @file_get_contents($realPath);
-                    if ($content) {
-                        $authorsInFile = array_merge($authorsInFile, $this->extractAuthorCandidates($content));
-                        $authorsInFile = array_merge($authorsInFile, $this->extractBinaryPlistAuthorCandidates($content));
-                    }
-                }
-            }
-
-            $totalExtractedSize += $currentExtractedSize;
-
-            if ($totalExtractedSize > 10737418240) { // 10GB Total Limit
-                return response()->json(['error' => 'Total content exceeds 10GB limit.'], 413);
-            }
-
-            $authorsInFile = $this->uniqueValues($authorsInFile);
-            $renameCandidatesInFile = $this->uniqueValues(array_merge($renameCandidatesInFile, $authorsInFile));
-            $allAuthorTags = array_merge($allAuthorTags, $authorsInFile);
-            $allRenameCandidates = array_merge($allRenameCandidates, $renameCandidatesInFile);
-
-            $manifest['source_files'][] = [
-                'name' => $source['name'],
-                'size' => $source['size'],
-                'asset_count' => $assetCount,
-                'author_tags' => $this->uniqueValues($authorsInFile)
-            ];
+            return $this->jsonResponseSafe($failure, 500);
         }
-
-        $manifest['detected_authors'] = $this->uniqueValues($allAuthorTags);
-        $manifest['rename_candidates'] = $this->uniqueValues($allRenameCandidates);
-        
-        Log::info("Job {$jobId} scan complete. Found " . count($manifest['assets']) . " assets and " . count($manifest['detected_authors']) . " author tags.");
-
-        $this->updateJob($jobId, [
-            'status' => 'scanned',
-            'manifest' => $manifest,
-            'progress' => 100,
-            'progress_message' => 'Scan complete. Review detected assets before rebrand.',
-            'progress_meta' => [
-                'phase' => 'scan',
-                'total_files' => $safeTotalFiles,
-                'completed_files' => $safeTotalFiles,
-                'current_file_index' => $safeTotalFiles,
-                'current_file_name' => $sourceFiles[$totalFiles - 1]['name'] ?? 'Package',
-                'assets_found' => count($manifest['assets']),
-                'detected_authors' => count($manifest['detected_authors']),
-                'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
-            ],
-        ]);
-
-        return response()->json([
-            'status' => 'scanned',
-            'manifest' => $manifest,
-            'progress_meta' => [
-                'phase' => 'scan',
-                'total_files' => $safeTotalFiles,
-                'completed_files' => $safeTotalFiles,
-                'current_file_index' => $safeTotalFiles,
-                'current_file_name' => $sourceFiles[$totalFiles - 1]['name'] ?? 'Package',
-                'assets_found' => count($manifest['assets']),
-                'detected_authors' => count($manifest['detected_authors']),
-                'elapsed_seconds' => (int) floor(microtime(true) - $scanStartedAt),
-            ],
-        ]);
     }
 
     /**
@@ -1849,7 +1962,7 @@ class StudioController extends Controller
     public function getStatus($jobId)
     {
         $job = $this->getJob($jobId);
-        return response()->json($job ?: ['error' => 'Job not found'], $job ? 200 : 404);
+        return $this->jsonResponseSafe($job ?: ['error' => 'Job not found'], $job ? 200 : 404);
     }
 
     public function cleanup($jobId)
@@ -3116,6 +3229,7 @@ PY;
 
     private function normalizeAuthorCandidate(string $candidate): ?string
     {
+        $candidate = $this->sanitizeUtf8String($candidate);
         $candidate = trim($candidate, " \t\n\r\0\x0B\"'`.,:;|[](){}<>");
         $candidate = preg_replace('/\.(brushset|brush|procreate|swatches|zip|plist|png|jpe?g|webp)$/i', '', $candidate) ?? $candidate;
         $candidate = preg_replace('/[_]+/', ' ', $candidate) ?? $candidate;
@@ -3147,16 +3261,124 @@ PY;
         $seen = [];
 
         foreach ($values as $value) {
-            $normalized = strtolower(trim((string) $value));
+            $sanitizedValue = trim($this->sanitizeUtf8String((string) $value));
+            $normalized = strtolower($sanitizedValue);
             if ($normalized === '' || isset($seen[$normalized])) {
                 continue;
             }
 
             $seen[$normalized] = true;
-            $unique[] = trim((string) $value);
+            $unique[] = $sanitizedValue;
         }
 
         return $unique;
+    }
+
+    private function sanitizeUtf8String(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        $value = str_replace("\0", '', $value);
+
+        if (preg_match('//u', $value)) {
+            return $value;
+        }
+
+        $converted = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
+        if ($converted !== false && $converted !== '') {
+            return str_replace("\0", '', $converted);
+        }
+
+        $encoding = function_exists('mb_detect_encoding')
+            ? mb_detect_encoding($value, ['UTF-8', 'Windows-1252', 'ISO-8859-1', 'ASCII'], true)
+            : false;
+
+        if ($encoding && function_exists('mb_convert_encoding')) {
+            $converted = @mb_convert_encoding($value, 'UTF-8', $encoding);
+            if (is_string($converted) && $converted !== '') {
+                return str_replace("\0", '', $converted);
+            }
+        }
+
+        return preg_replace('/[^\x20-\x7E]/', '', $value) ?? '';
+    }
+
+    private function sanitizeForJson(mixed $value): mixed
+    {
+        if (is_array($value)) {
+            $sanitized = [];
+            foreach ($value as $key => $item) {
+                $safeKey = is_string($key) ? $this->sanitizeUtf8String($key) : $key;
+                $sanitized[$safeKey] = $this->sanitizeForJson($item);
+            }
+
+            return $sanitized;
+        }
+
+        if (is_object($value)) {
+            return $this->sanitizeForJson((array) $value);
+        }
+
+        if (is_string($value)) {
+            return $this->sanitizeUtf8String($value);
+        }
+
+        return $value;
+    }
+
+    private function jsonResponseSafe(mixed $payload, int $status = 200)
+    {
+        return response()->json(
+            $this->sanitizeForJson($payload),
+            $status,
+            [],
+            JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+        );
+    }
+
+    private function buildStudioFailurePayload(string $phase, \Throwable $e, array $context = []): array
+    {
+        $rawMessage = trim($this->sanitizeUtf8String($e->getMessage()));
+        $currentFileName = trim($this->sanitizeUtf8String((string) ($context['current_file_name'] ?? '')));
+        $currentFileExtension = $currentFileName !== '' ? strtolower(pathinfo($currentFileName, PATHINFO_EXTENSION)) : '';
+
+        $reasonCode = 'processing_error';
+        $detail = $phase === 'scan'
+            ? 'Branding scan failed.'
+            : 'Repackaging failed.';
+
+        if (str_contains($rawMessage, 'Malformed UTF-8')) {
+            $reasonCode = 'invalid_metadata_encoding';
+            $detail = 'A file inside this package contains metadata or text that is not valid UTF-8.';
+        } elseif (str_contains(strtolower($rawMessage), 'could not be extracted') || str_contains(strtolower($rawMessage), 'zip')) {
+            $reasonCode = 'archive_extract_failed';
+            $detail = 'The uploaded archive could not be unpacked. The file may be corrupted or use an unsupported format.';
+        } elseif (str_contains(strtolower($rawMessage), 'source file is missing') || str_contains(strtolower($rawMessage), 'file not found')) {
+            $reasonCode = 'missing_source_file';
+            $detail = 'A required source file was missing while processing the package.';
+        } elseif (str_contains(strtolower($rawMessage), '10gb limit')) {
+            $reasonCode = 'content_limit_exceeded';
+            $detail = 'The expanded package content exceeds the 10 GB processing limit.';
+        } elseif (str_contains(strtolower($rawMessage), 'memory')) {
+            $reasonCode = 'memory_limit';
+            $detail = 'The server ran out of memory while processing this package.';
+        }
+
+        if ($currentFileName !== '') {
+            $detail .= " Last file checked: {$currentFileName}.";
+        }
+
+        return $this->sanitizeForJson([
+            'error' => $detail,
+            'detail' => $detail,
+            'phase' => $phase,
+            'reason_code' => $reasonCode,
+            'current_file_name' => $currentFileName ?: null,
+            'current_file_extension' => $currentFileExtension ?: null,
+            'technical_detail' => $rawMessage !== '' ? $rawMessage : null,
+        ]);
     }
 
     private function buildOutputFilename($original, $storeName) {
@@ -3184,7 +3406,7 @@ PY;
     private function getJob($jobId) {
         $path = $this->storagePath . '/' . $jobId . '/job.json';
         if (!file_exists($path)) return null;
-        $data = json_decode(file_get_contents($path), true);
+        $data = json_decode((string) file_get_contents($path), true, 512, JSON_INVALID_UTF8_SUBSTITUTE);
         return $data ? (object)$data : null;
     }
 
@@ -3202,7 +3424,8 @@ PY;
                 $data['last_activity_at'] = $data['last_activity_at'] ?? $now->toIso8601String();
                 $data['expires_at'] = $data['expires_at'] ?? $now->copy()->addHours(max(1, (int) config('studio.job_retention_hours', 24)))->toIso8601String();
                 $job = array_merge($job, $data);
-                $json = json_encode($job, JSON_PRETTY_PRINT);
+                $job = $this->sanitizeForJson($job);
+                $json = json_encode($job, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
                 if ($json === false) throw new \Exception("JSON encode failed");
                 
                 $tempPath = $path . '.tmp';

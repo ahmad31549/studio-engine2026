@@ -802,10 +802,18 @@
             if (typeof data?.detail === 'string' && data.detail.trim()) {
                 return data.detail;
             }
+            if (typeof data?.error === 'string' && data.error.trim()) {
+                return data.error;
+            }
         }
 
         const text = (await response.text().catch(() => '')).trim();
-        return text ? `${fallback} (${response.status}): ${text.slice(0, 180)}` : `${fallback} (${response.status})`;
+        const compact = text.replace(/\s+/g, ' ').trim();
+        if (/<!doctype html/i.test(compact) || /<html/i.test(compact)) {
+            return `${fallback} (${response.status}): Server returned an HTML error page before the job could explain the real failure. Check the current file, package format, or retry after refresh.`;
+        }
+
+        return compact ? `${fallback} (${response.status}): ${compact.slice(0, 180)}` : `${fallback} (${response.status})`;
     }
 
     function escapeHtml(value) {
@@ -967,7 +975,12 @@
         }
 
         const text = String(xhr.responseText || '').trim();
-        return text ? `${fallback} (${xhr.status}): ${text.slice(0, 180)}` : `${fallback} (${xhr.status || 'network'})`;
+        const compact = text.replace(/\s+/g, ' ').trim();
+        if (/<!doctype html/i.test(compact) || /<html/i.test(compact)) {
+            return `${fallback} (${xhr.status || 'network'}): Server returned an HTML error page before the upload could report a structured reason.`;
+        }
+
+        return compact ? `${fallback} (${xhr.status}): ${compact.slice(0, 180)}` : `${fallback} (${xhr.status || 'network'})`;
     }
 
     function shouldRetryChunkUpload(status) {
@@ -2344,10 +2357,21 @@
             }
 
             const data = await resp.json();
+            state.lastBackendProgressAt = Date.now();
+            state.progressMeta = data.progress_meta || state.progressMeta;
+            if (typeof data.progress === 'number') {
+                setProgressDisplay(data.progress);
+            }
+            if (data.progress_message) {
+                elements.stageMessage.innerText = data.progress_message;
+            }
+
+            if (data.status === 'scanning') {
+                return;
+            }
+
             clearInterval(pollInterval);
             stopStageActivity();
-            state.lastBackendProgressAt = Date.now();
-            state.progressMeta = data.progress_meta || null;
 
             if (data.status === 'scanned') {
                 setProgressDisplay(100);
@@ -2359,7 +2383,10 @@
                 if (document.getElementById('globalAutoProcess')?.checked) {
                     setTimeout(() => handleRebrand(), 500);
                 }
+                return;
             }
+
+            throw new Error(data.error || 'Branding scan did not complete.');
         } catch (e) {
             clearInterval(pollInterval);
             stopStageActivity();
@@ -2545,7 +2572,7 @@
                     clearInterval(pollInterval);
                     stopStageActivity();
                     state.status = 'error';
-                    elements.errorMessage.innerText = data.error || "Processing failed.";
+                    elements.errorMessage.innerText = data.error_detail || data.detail || data.error || "Processing failed.";
                     updateView();
                 }
             } catch (e) {
