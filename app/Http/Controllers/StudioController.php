@@ -1443,6 +1443,18 @@ class StudioController extends Controller
 
         if (!$request->boolean('_background')) {
             $files = is_array($job->files ?? null) ? $job->files : [];
+            $activeProgressMeta = is_array($job->progress_meta ?? null) ? $job->progress_meta : [];
+            if (($job->status ?? null) === 'processing' && ($activeProgressMeta['phase'] ?? null) === 'rebrand') {
+                return $this->jsonResponseSafe([
+                    'status' => 'processing',
+                    'job_id' => $jobId,
+                    'progress' => (int) ($job->progress ?? 2),
+                    'progress_message' => $job->progress_message ?? 'Repackaging is already running...',
+                    'progress_meta' => $activeProgressMeta,
+                    'drive_storage' => $job->drive_storage ?? [],
+                ], 202);
+            }
+
             $initialMeta = [
                 'phase' => 'rebrand',
                 'total_files' => max(count($files), 1),
@@ -1473,31 +1485,51 @@ class StudioController extends Controller
 
             $userId = Auth::id();
             app()->terminating(function () use ($backgroundRequest, $jobId, $userId, $files): void {
+                $lockHandle = null;
                 try {
+                    $lockHandle = $this->acquireJobProcessLock($jobId, 'rebrand');
                     if ($userId) {
                         Auth::onceUsingId($userId);
                     }
 
                     $this->rebrand($backgroundRequest, $jobId);
+                } catch (\RuntimeException $e) {
+                    if ($e->getMessage() === 'Job lock is already held.') {
+                        Log::info("Rebrand already running for job {$jobId}; duplicate background trigger ignored.");
+                        return;
+                    }
+
+                    throw $e;
                 } catch (\Throwable $e) {
                     Log::error("Rebrand failed for job {$jobId}: " . $e->getMessage(), [
                         'exception' => $e,
                     ]);
 
+                    $currentJob = $this->getJob($jobId);
+                    $progressMeta = is_array($currentJob?->progress_meta ?? null) ? $currentJob->progress_meta : [];
+                    $failure = $this->buildStudioFailurePayload('rebrand', $e, [
+                        'current_file_name' => $progressMeta['current_file_name'] ?? ($files[0]['name'] ?? 'Package'),
+                    ]);
+
                     $this->updateJob($jobId, [
                         'status' => 'failed',
-                        'error' => $e->getMessage(),
+                        'error' => $failure['error'],
+                        'error_detail' => $failure['detail'],
+                        'error_reason_code' => $failure['reason_code'],
                         'progress_message' => 'Repackaging failed.',
                         'progress_meta' => [
                             'phase' => 'rebrand',
                             'total_files' => max(count($files), 1),
                             'completed_files' => 0,
                             'current_file_index' => 1,
-                            'current_file_name' => $files[0]['name'] ?? 'Package',
+                            'current_file_name' => $failure['current_file_name'] ?? ($files[0]['name'] ?? 'Package'),
                             'elapsed_seconds' => 0,
                             'action' => 'Failed',
+                            'reason_code' => $failure['reason_code'],
                         ],
                     ]);
+                } finally {
+                    $this->releaseJobProcessLock($lockHandle);
                 }
             });
 
@@ -1652,11 +1684,16 @@ class StudioController extends Controller
             }
 
             $workDir = $this->storagePath . '/' . $jobId . '/temp_' . $index;
-            File::copyDirectory($sourceExtractPath, $workDir);
+            if (File::exists($workDir)) {
+                File::deleteDirectory($workDir);
+            }
+
+            if (!File::copyDirectory($sourceExtractPath, $workDir)) {
+                throw new \RuntimeException("Failed to prepare a temporary workspace for {$source['name']}");
+            }
 
             if (!File::exists($workDir)) {
-                Log::error("Repackaging workDir missing for job {$jobId}: {$workDir}");
-                continue;
+                throw new \RuntimeException("Temporary workspace was not created for {$source['name']}");
             }
 
             try {
@@ -1673,9 +1710,14 @@ class StudioController extends Controller
             $counter = 0;
             foreach ($iterator as $f) {
                 if ($f->isDir()) continue;
+
+                $filePath = $f->getPathname();
+                if (!is_string($filePath) || $filePath === '') {
+                    continue;
+                }
                 
                 if ($this->shouldRewriteMetadataFile($f)) {
-                    $this->rewriteMetadataFile($f->getRealPath(), $authorReplacements);
+                    $this->rewriteMetadataFile($filePath, $authorReplacements);
                 }
 
                 // Sub-progress during rebranding
@@ -2701,6 +2743,11 @@ class StudioController extends Controller
 
         $updatedContent = $this->replaceAuthorStrings($content, $replacements);
         if ($updatedContent !== $content) {
+            $parentDir = dirname($filePath);
+            if (!is_dir($parentDir)) {
+                throw new \RuntimeException('The temporary package folder disappeared while rewriting ' . basename($filePath));
+            }
+
             file_put_contents($filePath, $updatedContent);
         }
     }
@@ -3338,6 +3385,44 @@ PY;
         );
     }
 
+    private function acquireJobProcessLock(string $jobId, string $process): mixed
+    {
+        $lockPath = $this->storagePath . '/' . $jobId . '/.' . preg_replace('/[^a-z0-9_-]+/i', '_', $process) . '.lock';
+        $lockDir = dirname($lockPath);
+        if (!is_dir($lockDir)) {
+            @mkdir($lockDir, 0755, true);
+        }
+
+        $handle = @fopen($lockPath, 'c+');
+        if ($handle === false) {
+            throw new \RuntimeException('Unable to create a process lock file.');
+        }
+
+        if (!@flock($handle, LOCK_EX | LOCK_NB)) {
+            fclose($handle);
+            throw new \RuntimeException('Job lock is already held.');
+        }
+
+        ftruncate($handle, 0);
+        fwrite($handle, json_encode([
+            'process' => $process,
+            'locked_at' => now()->toIso8601String(),
+            'pid' => function_exists('getmypid') ? getmypid() : null,
+        ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE));
+
+        return $handle;
+    }
+
+    private function releaseJobProcessLock(mixed $handle): void
+    {
+        if (!is_resource($handle)) {
+            return;
+        }
+
+        @flock($handle, LOCK_UN);
+        @fclose($handle);
+    }
+
     private function buildStudioFailurePayload(string $phase, \Throwable $e, array $context = []): array
     {
         $rawMessage = trim($this->sanitizeUtf8String($e->getMessage()));
@@ -3355,6 +3440,9 @@ PY;
         } elseif (str_contains(strtolower($rawMessage), 'could not be extracted') || str_contains(strtolower($rawMessage), 'zip')) {
             $reasonCode = 'archive_extract_failed';
             $detail = 'The uploaded archive could not be unpacked. The file may be corrupted or use an unsupported format.';
+        } elseif (str_contains(strtolower($rawMessage), 'temporary package folder disappeared') || str_contains(strtolower($rawMessage), 'failed to open stream: no such file or directory')) {
+            $reasonCode = 'workspace_missing';
+            $detail = 'The temporary workspace disappeared while repackaging this file.';
         } elseif (str_contains(strtolower($rawMessage), 'source file is missing') || str_contains(strtolower($rawMessage), 'file not found')) {
             $reasonCode = 'missing_source_file';
             $detail = 'A required source file was missing while processing the package.';
