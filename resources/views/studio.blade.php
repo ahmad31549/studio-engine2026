@@ -837,7 +837,7 @@
         return formData;
     }
 
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB Chunks
+    const CHUNK_SIZE = 16 * 1024 * 1024; // 16MB chunks reduce request overhead on shared hosting
 
     function updateUploadProgressUI(currentUploaded, totalSize, completedFiles, totalFiles, startTime) {
         const safeTotal = Math.max(totalSize || 0, 1);

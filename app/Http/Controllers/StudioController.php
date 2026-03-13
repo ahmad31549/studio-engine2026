@@ -383,8 +383,27 @@ class StudioController extends Controller
         $tempPath = $jobDir . '/' . $fileName . '.part';
         
         // Append chunk to the file
+        $sourcePath = $file->getPathname();
+        if (!is_string($sourcePath) || $sourcePath === '' || !is_file($sourcePath)) {
+            return response()->json(['error' => 'Uploaded chunk could not be read'], 422);
+        }
+
+        $input = fopen($sourcePath, 'rb');
         $out = fopen($tempPath, $chunkIndex === 0 ? 'wb' : 'ab');
-        fwrite($out, file_get_contents($file->getRealPath()));
+
+        if ($input === false || $out === false) {
+            if (is_resource($input)) {
+                fclose($input);
+            }
+            if (is_resource($out)) {
+                fclose($out);
+            }
+
+            return response()->json(['error' => 'Failed to open upload streams'], 500);
+        }
+
+        stream_copy_to_stream($input, $out);
+        fclose($input);
         fclose($out);
 
         if ($chunkIndex === $totalChunks - 1) {
