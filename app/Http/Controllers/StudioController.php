@@ -130,6 +130,170 @@ class StudioController extends Controller
         ]);
     }
 
+    public function initDriveUpload(Request $request)
+    {
+        $files = $request->input('files', []);
+        if (!is_array($files) || $files === []) {
+            return response()->json(['error' => 'No files provided'], 400);
+        }
+
+        $normalizedFiles = [];
+        $totalSize = 0;
+
+        foreach ($files as $file) {
+            if (!is_array($file)) {
+                continue;
+            }
+
+            $name = trim((string) ($file['name'] ?? ''));
+            $size = (int) ($file['size'] ?? 0);
+            $type = trim((string) ($file['type'] ?? 'application/octet-stream')) ?: 'application/octet-stream';
+
+            if ($name === '' || $size <= 0) {
+                return response()->json(['error' => 'Each file requires a valid name and size'], 422);
+            }
+
+            $normalizedFiles[] = [
+                'name' => $name,
+                'size' => $size,
+                'type' => $type,
+            ];
+            $totalSize += $size;
+        }
+
+        if ($normalizedFiles === []) {
+            return response()->json(['error' => 'No valid files provided'], 422);
+        }
+
+        if ($totalSize > 10737418240) {
+            return response()->json(['error' => 'Total upload exceeds 10GB limit.'], 413);
+        }
+
+        $driveToken = $this->resolveGoogleDriveAccessToken($request->input('drive_token'));
+        if ($driveToken === '') {
+            return response()->json(['error' => 'Google Drive is not available for direct uploads.'], 400);
+        }
+
+        try {
+            $jobId = (string) Str::uuid();
+            $folder = $this->ensureGoogleDriveJobFolder($driveToken, $jobId);
+            $driveStorage = $this->buildDriveStorageState([
+                'enabled' => true,
+                'provider' => 'google_drive',
+                'status' => 'uploading',
+                'error' => null,
+                'inputs_synced' => 0,
+                'outputs_synced' => 0,
+            ], $folder);
+
+            $sessions = [];
+            foreach ($normalizedFiles as $index => $file) {
+                $upload = $this->createGoogleDriveUploadSession(
+                    $driveToken,
+                    $file['name'],
+                    $folder['job_folder_id'],
+                    $file['size'],
+                    $file['type']
+                );
+
+                $sessions[] = [
+                    'index' => $index,
+                    'name' => $file['name'],
+                    'size' => $file['size'],
+                    'type' => $file['type'],
+                    'upload_url' => $upload['upload_url'],
+                ];
+            }
+
+            $this->updateJob($jobId, [
+                'job_id' => $jobId,
+                'user_id' => Auth::id(),
+                'status' => 'drive_uploading',
+                'files' => [],
+                'progress' => 0,
+                'progress_message' => 'Uploading files to managed Google Drive...',
+                'uploaded_file_count' => count($normalizedFiles),
+                'uploaded_file_names' => array_values(array_map(fn (array $file) => $file['name'], $normalizedFiles)),
+                'drive_storage' => $driveStorage,
+            ]);
+
+            return response()->json([
+                'job_id' => $jobId,
+                'uploads' => $sessions,
+                'drive_storage' => $driveStorage,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Drive upload initialization failed: ' . $e->getMessage());
+
+            return response()->json([
+                'error' => 'Managed Google Drive upload initialization failed.',
+                'detail' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function completeDriveUpload(Request $request)
+    {
+        $driveFiles = $request->input('drive_files', []);
+        if (!is_array($driveFiles) || $driveFiles === []) {
+            return response()->json(['error' => 'No uploaded Drive files provided'], 400);
+        }
+
+        $normalizedFiles = [];
+        foreach ($driveFiles as $file) {
+            if (!is_array($file)) {
+                continue;
+            }
+
+            $fileId = trim((string) ($file['id'] ?? $file['file_id'] ?? ''));
+            $name = trim((string) ($file['name'] ?? ''));
+            if ($fileId === '') {
+                return response()->json(['error' => 'Each Drive file requires an id'], 422);
+            }
+
+            $normalizedFiles[] = [
+                'id' => $fileId,
+                'name' => $name,
+                'size' => isset($file['size']) ? (int) $file['size'] : null,
+                'webViewLink' => isset($file['webViewLink']) ? (string) $file['webViewLink'] : null,
+                'webContentLink' => isset($file['webContentLink']) ? (string) $file['webContentLink'] : null,
+            ];
+        }
+
+        if ($normalizedFiles === []) {
+            return response()->json(['error' => 'No valid Drive files provided'], 422);
+        }
+
+        $jobId = trim((string) $request->input('job_id'));
+        if ($jobId === '') {
+            $jobId = (string) Str::uuid();
+        }
+
+        $driveToken = $this->resolveGoogleDriveAccessToken($request->input('drive_token', $request->input('token')));
+        if ($driveToken === '') {
+            return response()->json(['error' => 'Google Drive access token is required.'], 400);
+        }
+
+        try {
+            $job = $this->importDriveFilesToJob($jobId, $normalizedFiles, $driveToken);
+            $this->purgeOldJobs();
+
+            return response()->json([
+                'job_id' => $jobId,
+                'status' => 'uploaded',
+                'files' => $job->files ?? [],
+                'drive_storage' => $job->drive_storage ?? [],
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning("Drive upload completion failed for job {$jobId}: " . $e->getMessage());
+
+            return response()->json([
+                'error' => 'Drive import failed.',
+                'detail' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     /**
      * Handle direct file uploads
      */
@@ -403,57 +567,194 @@ class StudioController extends Controller
 
     private function downloadFromGoogleDriveApi($fileId, $jobId, $jobDir, $token = null)
     {
-        $apiKey = env('GOOGLE_DRIVE_API_KEY');
-        if (!$apiKey && !$token) {
-            throw new \Exception("Google Drive API is not configured (Missing API Key or Token).");
+        $downloaded = $this->downloadGoogleDriveFileToLocal((string) $fileId, $jobDir, $token);
+
+        $job = $this->updateJob($jobId, [
+            'job_id' => $jobId,
+            'user_id' => Auth::id(),
+            'status' => 'uploaded',
+            'files' => [[
+                'name' => $downloaded['name'],
+                'path' => $downloaded['path'],
+                'size' => $downloaded['size'],
+                'drive_file_id' => $downloaded['id'],
+                'drive_url' => $downloaded['webViewLink'] ?? $this->buildGoogleDriveFileUrl($downloaded['id']),
+                'drive_download_url' => $downloaded['webContentLink'] ?? null,
+                'storage_provider' => 'google_drive',
+            ]],
+            'progress' => 0,
+            'progress_message' => 'Cloud import complete.',
+        ]);
+
+        return response()->json([
+            'job_id' => $jobId,
+            'status' => 'uploaded',
+            'drive_storage' => $job->drive_storage ?? [],
+        ]);
+    }
+
+    private function importDriveFilesToJob(string $jobId, array $driveFiles, string $token): object
+    {
+        $jobDir = $this->storagePath . '/' . $jobId . '/input';
+        if (!file_exists($jobDir)) {
+            mkdir($jobDir, 0755, true);
         }
 
-        try {
-            $client = Http::timeout(300);
-            if ($token) {
-                $client->withToken($token);
-                $metaUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}";
-                $contentUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}?alt=media";
-            } else {
-                $metaUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}?key={$apiKey}";
-                $contentUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}?alt=media&key={$apiKey}";
-            }
+        $existingJob = $this->getJob($jobId);
+        $driveStorage = is_array($existingJob?->drive_storage ?? null) ? $existingJob->drive_storage : [];
 
-            // First get Metadata
-            $metaResponse = $client->get($metaUrl);
-            if (!$metaResponse->successful()) {
-                throw new \Exception("Failed to fetch file metadata from Google API: " . $metaResponse->body());
-            }
-            $meta = $metaResponse->json();
-            $filename = $meta['name'] ?? "google_drive_file.zip";
-            
-            $filePath = $jobDir . '/' . $filename;
-            
-            // Stream content to sink
-            $response = $client->withOptions([
-                'sink' => $filePath
-            ])->get($contentUrl);
+        $this->updateJob($jobId, [
+            'job_id' => $jobId,
+            'user_id' => Auth::id(),
+            'status' => 'importing',
+            'progress' => 1,
+            'progress_message' => 'Importing files from Google Drive...',
+            'uploaded_file_count' => count($driveFiles),
+            'uploaded_file_names' => array_values(array_map(
+                fn (array $file) => trim((string) ($file['name'] ?? 'Google Drive file')) ?: 'Google Drive file',
+                $driveFiles
+            )),
+            'drive_storage' => $driveStorage,
+        ]);
 
-            if (!$response->successful()) {
-                throw new \Exception("Google Drive API download failed. Status: " . $response->status());
-            }
+        $savedFiles = [];
+        $totalFiles = count($driveFiles);
+        $safeTotalFiles = max($totalFiles, 1);
+
+        foreach ($driveFiles as $index => $driveFile) {
+            $downloaded = $this->downloadGoogleDriveFileToLocal((string) $driveFile['id'], $jobDir, $token);
+
+            $savedFiles[] = [
+                'name' => $downloaded['name'],
+                'path' => $downloaded['path'],
+                'size' => $downloaded['size'],
+                'drive_file_id' => $downloaded['id'],
+                'drive_url' => $driveFile['webViewLink'] ?? $downloaded['webViewLink'] ?? $this->buildGoogleDriveFileUrl($downloaded['id']),
+                'drive_download_url' => $driveFile['webContentLink'] ?? $downloaded['webContentLink'] ?? null,
+                'storage_provider' => 'google_drive',
+            ];
 
             $this->updateJob($jobId, [
-                'job_id' => $jobId,
-                'user_id' => Auth::id(),
-                'status' => 'uploaded',
-                'files' => [[
-                    'name' => $filename,
-                    'path' => $filePath,
-                    'size' => filesize($filePath)
-                ]],
-                'progress' => 0
+                'status' => 'importing',
+                'progress' => min(99, 5 + (int) ((($index + 1) / $safeTotalFiles) * 90)),
+                'progress_message' => "Importing " . ($index + 1) . "/{$totalFiles}: " . $downloaded['name'],
+                'progress_meta' => [
+                    'phase' => 'upload',
+                    'total_files' => $safeTotalFiles,
+                    'completed_files' => $index + 1,
+                    'current_file_index' => $index + 1,
+                    'current_file_name' => $downloaded['name'],
+                    'action' => 'Importing from Google Drive',
+                ],
             ]);
-
-            return response()->json(['job_id' => $jobId, 'status' => 'uploaded']);
-        } catch (\Exception $e) {
-            throw $e;
         }
+
+        if ($driveStorage !== []) {
+            $driveStorage['enabled'] = true;
+            $driveStorage['provider'] = 'google_drive';
+            $driveStorage['status'] = 'synced';
+            $driveStorage['error'] = null;
+            $driveStorage['inputs_synced'] = count($savedFiles);
+            $driveStorage['last_synced_at'] = now()->toIso8601String();
+        }
+
+        return $this->updateJob($jobId, [
+            'job_id' => $jobId,
+            'user_id' => Auth::id(),
+            'status' => 'uploaded',
+            'files' => $savedFiles,
+            'progress' => 0,
+            'progress_message' => 'Cloud import complete.',
+            'progress_meta' => [
+                'phase' => 'upload',
+                'total_files' => $safeTotalFiles,
+                'completed_files' => $safeTotalFiles,
+                'current_file_index' => $safeTotalFiles,
+                'current_file_name' => $savedFiles[count($savedFiles) - 1]['name'] ?? 'Google Drive file',
+                'action' => 'Upload complete',
+            ],
+            'drive_storage' => $driveStorage,
+        ]);
+    }
+
+    private function downloadGoogleDriveFileToLocal(string $fileId, string $jobDir, ?string $token = null): array
+    {
+        $apiKey = env('GOOGLE_DRIVE_API_KEY');
+        if (!$apiKey && !$token) {
+            throw new \RuntimeException("Google Drive API is not configured (Missing API Key or Token).");
+        }
+
+        $client = Http::timeout(300);
+        if ($token) {
+            $client = $client->withToken($token);
+            $metaUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}";
+            $contentUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}?alt=media";
+        } else {
+            $metaUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}?key={$apiKey}";
+            $contentUrl = "https://www.googleapis.com/drive/v3/files/{$fileId}?alt=media&key={$apiKey}";
+        }
+
+        $metaResponse = $client->get($metaUrl);
+        if (!$metaResponse->successful()) {
+            throw new \RuntimeException("Failed to fetch file metadata from Google API: " . $metaResponse->body());
+        }
+
+        $meta = $metaResponse->json();
+        $filename = trim((string) ($meta['name'] ?? 'google_drive_file.zip')) ?: 'google_drive_file.zip';
+        $filePath = $this->makeUniqueLocalPath($jobDir, $filename);
+
+        $response = $client->withOptions([
+            'sink' => $filePath,
+        ])->get($contentUrl);
+
+        if (!$response->successful()) {
+            throw new \RuntimeException("Google Drive API download failed. Status: " . $response->status());
+        }
+
+        return [
+            'id' => $fileId,
+            'name' => basename($filePath),
+            'path' => $filePath,
+            'size' => filesize($filePath) ?: 0,
+            'webViewLink' => $meta['webViewLink'] ?? $this->buildGoogleDriveFileUrl($fileId),
+            'webContentLink' => $meta['webContentLink'] ?? null,
+        ];
+    }
+
+    private function createGoogleDriveUploadSession(
+        string $token,
+        string $name,
+        string $parentId,
+        int $size,
+        string $mimeType = 'application/octet-stream'
+    ): array {
+        $metadata = [
+            'name' => $name,
+            'parents' => [$parentId],
+        ];
+
+        $initResponse = Http::timeout(120)
+            ->withToken($token)
+            ->withHeaders([
+                'Content-Type' => 'application/json; charset=UTF-8',
+                'X-Upload-Content-Type' => $mimeType,
+                'X-Upload-Content-Length' => (string) $size,
+            ])
+            ->withBody(json_encode($metadata, JSON_THROW_ON_ERROR), 'application/json; charset=UTF-8')
+            ->send('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,webViewLink,webContentLink');
+
+        if (!$initResponse->successful()) {
+            throw new \RuntimeException('Google Drive resumable upload start failed: ' . $initResponse->body());
+        }
+
+        $uploadUrl = $initResponse->header('Location');
+        if (!is_string($uploadUrl) || trim($uploadUrl) === '') {
+            throw new \RuntimeException('Google Drive did not return a resumable upload URL.');
+        }
+
+        return [
+            'upload_url' => $uploadUrl,
+        ];
     }
 
     /**
@@ -1696,6 +1997,30 @@ class StudioController extends Controller
     private function buildGoogleDriveFileUrl(string $fileId): string
     {
         return 'https://drive.google.com/file/d/' . rawurlencode($fileId) . '/view';
+    }
+
+    private function makeUniqueLocalPath(string $directory, string $filename): string
+    {
+        $candidate = $directory . DIRECTORY_SEPARATOR . $filename;
+        if (!File::exists($candidate)) {
+            return $candidate;
+        }
+
+        $name = pathinfo($filename, PATHINFO_FILENAME);
+        $extension = pathinfo($filename, PATHINFO_EXTENSION);
+        $suffix = 1;
+
+        do {
+            $next = $name . ' (' . $suffix . ')';
+            if ($extension !== '') {
+                $next .= '.' . $extension;
+            }
+
+            $candidate = $directory . DIRECTORY_SEPARATOR . $next;
+            $suffix++;
+        } while (File::exists($candidate));
+
+        return $candidate;
     }
 
     private function escapeGoogleDriveQueryValue(string $value): string

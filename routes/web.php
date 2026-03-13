@@ -44,6 +44,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
 // Studio Engine Routes (Auth only, skip 'verified' to ensure AJAX works for everyone)
 Route::middleware(['auth', 'can:access-procreate-studio'])->group(function () {
     Route::prefix('studio-engine')->group(function () {
+        Route::post('/drive-upload/init', [\App\Http\Controllers\StudioController::class, 'initDriveUpload']);
+        Route::post('/drive-upload/complete', [\App\Http\Controllers\StudioController::class, 'completeDriveUpload']);
         Route::post('/upload', [\App\Http\Controllers\StudioController::class, 'upload']);
         Route::post('/upload-chunk', [\App\Http\Controllers\StudioController::class, 'uploadChunk']);
         Route::post('/finalize-upload', [\App\Http\Controllers\StudioController::class, 'finalizeUpload']);

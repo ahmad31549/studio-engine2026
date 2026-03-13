@@ -686,21 +686,30 @@
 
     async function pickerCallback(data) {
         if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
-            const doc = data[google.picker.Response.DOCUMENTS][0];
-            const fileId = doc[google.picker.Document.ID];
-            
-            // Send File ID to backend to handle download via API
+            const docs = data[google.picker.Response.DOCUMENTS] || [];
+            if (!Array.isArray(docs) || docs.length === 0) {
+                return;
+            }
+
             state.status = 'uploading';
             updateView();
             
             if (elements.stageTitle) elements.stageTitle.innerText = "Connecting Google Drive...";
-            if (elements.stageMessage) elements.stageMessage.innerText = "Securely fetching \"" + doc.name + "\" from your cloud storage.";
+            if (elements.stageMessage) elements.stageMessage.innerText = docs.length === 1
+                ? "Securely fetching \"" + docs[0].name + "\" from your cloud storage."
+                : `Securely fetching ${docs.length} files from your cloud storage.`;
 
             try {
-                const response = await apiFetch('/upload-url', {
+                const response = await apiFetch('/drive-upload/complete', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ file_id: fileId, token: oauthToken })
+                    body: JSON.stringify({
+                        drive_files: docs.map((doc) => ({
+                            id: doc[google.picker.Document.ID],
+                            name: doc[google.picker.Document.NAME] || doc.name || 'Google Drive file',
+                        })),
+                        drive_token: oauthToken || ''
+                    })
                 });
 
                 if (!response.ok) {
@@ -714,6 +723,8 @@
                 const resData = await response.json();
                 state.jobId = resData.job_id;
                 state.driveStorage = resData.drive_storage || state.driveStorage;
+                state.uploadedFileCount = docs.length;
+                state.uploadedFileNames = docs.map((doc) => doc[google.picker.Document.NAME] || doc.name || 'Google Drive file');
                 state.status = 'uploaded';
                 updateView();
             } catch (error) {
@@ -828,6 +839,141 @@
 
     const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB Chunks
 
+    function updateUploadProgressUI(currentUploaded, totalSize, completedFiles, totalFiles, startTime) {
+        const safeTotal = Math.max(totalSize || 0, 1);
+        const percent = Math.min(99, Math.round((currentUploaded / safeTotal) * 100));
+
+        if (elements.progressPercent) elements.progressPercent.innerText = percent + "%";
+        if (elements.progressFill) elements.progressFill.style.width = percent + "%";
+
+        const elapsed = (Date.now() - startTime) / 1000;
+        const speed = currentUploaded / (elapsed || 0.1);
+        const remaining = Math.max(0, totalSize - currentUploaded);
+        const eta = speed > 0 ? Math.ceil(remaining / speed) : 0;
+
+        if (elements.statSpeed) elements.statSpeed.innerText = formatFileSize(speed) + "/s";
+        if (elements.statTransferred) elements.statTransferred.innerText = `${formatFileSize(currentUploaded)} / ${formatFileSize(totalSize)}`;
+        if (elements.statFiles) elements.statFiles.innerText = `${completedFiles} / ${totalFiles}`;
+        if (elements.statEta) {
+            if (eta > 0) {
+                const mins = Math.floor(eta / 60);
+                const secs = eta % 60;
+                elements.statEta.innerText = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+            } else {
+                elements.statEta.innerText = "Finishing...";
+            }
+        }
+    }
+
+    async function uploadViaManagedDrive(files) {
+        const totalSize = files.reduce((acc, f) => acc + f.size, 0);
+        const startTime = Date.now();
+        let uploadedBytes = 0;
+        let completedFiles = 0;
+
+        if (elements.stageTitle) elements.stageTitle.innerText = "Uploading to Google Drive...";
+        if (elements.stageMessage) elements.stageMessage.innerText = "Sending files to managed cloud storage before processing.";
+
+        const initResp = await apiFetch('/drive-upload/init', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                files: files.map((file) => ({
+                    name: file.name,
+                    size: file.size,
+                    type: file.type || 'application/octet-stream'
+                })),
+                drive_token: window.oauthToken || ''
+            })
+        });
+
+        if (!initResp.ok) {
+            throw new Error(await readErrorMessage(initResp, 'Managed Google Drive upload initialization failed'));
+        }
+
+        const initData = await initResp.json();
+        const uploads = Array.isArray(initData.uploads) ? initData.uploads : [];
+        if (!initData.job_id || uploads.length !== files.length) {
+            throw new Error('Managed Google Drive upload initialization returned incomplete session data');
+        }
+
+        state.jobId = initData.job_id;
+        state.driveStorage = initData.drive_storage || state.driveStorage;
+
+        const uploadedDriveFiles = [];
+
+        for (let index = 0; index < files.length; index++) {
+            const file = files[index];
+            const upload = uploads[index];
+
+            const payload = await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('PUT', upload.upload_url);
+                xhr.responseType = 'json';
+                xhr.setRequestHeader('Content-Type', file.type || upload.type || 'application/octet-stream');
+
+                xhr.upload.onprogress = (event) => {
+                    if (!event.lengthComputable) {
+                        return;
+                    }
+
+                    updateUploadProgressUI(uploadedBytes + event.loaded, totalSize, completedFiles, files.length, startTime);
+                };
+
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        let responsePayload = xhr.response;
+                        if (!responsePayload && xhr.responseText) {
+                            try {
+                                responsePayload = JSON.parse(xhr.responseText);
+                            } catch (error) {
+                                responsePayload = {};
+                            }
+                        }
+                        resolve(responsePayload || {});
+                        return;
+                    }
+
+                    reject(new Error(`Managed Google Drive upload failed (${xhr.status})`));
+                };
+
+                xhr.onerror = () => reject(new Error('Network error during managed Google Drive upload'));
+                xhr.send(file);
+            });
+
+            uploadedBytes += file.size;
+            completedFiles += 1;
+            updateUploadProgressUI(uploadedBytes, totalSize, completedFiles, files.length, startTime);
+
+            uploadedDriveFiles.push({
+                id: payload.id,
+                name: payload.name || file.name,
+                size: Number(payload.size || file.size),
+                webViewLink: payload.webViewLink || null,
+                webContentLink: payload.webContentLink || null,
+            });
+        }
+
+        if (elements.stageTitle) elements.stageTitle.innerText = "Importing into Engine...";
+        if (elements.stageMessage) elements.stageMessage.innerText = "Fetching your Drive files into the processing workspace.";
+
+        const completeResp = await apiFetch('/drive-upload/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                job_id: initData.job_id,
+                drive_files: uploadedDriveFiles,
+                drive_token: window.oauthToken || ''
+            })
+        });
+
+        if (!completeResp.ok) {
+            throw new Error(await readErrorMessage(completeResp, 'Managed Google Drive import failed'));
+        }
+
+        return completeResp;
+    }
+
     async function uploadWithChunks(files) {
         const jobId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Math.random().toString(36).substring(2);
         const totalSize = files.reduce((acc, f) => acc + f.size, 0);
@@ -856,29 +1002,7 @@
                     
                     xhr.upload.onprogress = (e) => {
                         if (e.lengthComputable) {
-                            const currentUploaded = uploadedBytes + e.loaded;
-                            const percent = Math.min(99, Math.round((currentUploaded / totalSize) * 100));
-                            
-                            if (elements.progressPercent) elements.progressPercent.innerText = percent + "%";
-                            if (elements.progressFill) elements.progressFill.style.width = percent + "%";
-                            
-                            const elapsed = (Date.now() - startTime) / 1000;
-                            const speed = currentUploaded / (elapsed || 0.1);
-                            const remaining = totalSize - currentUploaded;
-                            const eta = speed > 0 ? Math.ceil(remaining / speed) : 0;
-                            
-                            if (elements.statSpeed) elements.statSpeed.innerText = formatFileSize(speed) + "/s";
-                            if (elements.statTransferred) elements.statTransferred.innerText = `${formatFileSize(currentUploaded)} / ${formatFileSize(totalSize)}`;
-                            if (elements.statFiles) elements.statFiles.innerText = `${completedFiles} / ${files.length}`;
-                            if (elements.statEta) {
-                                if (eta > 0) {
-                                    const mins = Math.floor(eta / 60);
-                                    const secs = eta % 60;
-                                    elements.statEta.innerText = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-                                } else {
-                                    elements.statEta.innerText = "Finishing...";
-                                }
-                            }
+                            updateUploadProgressUI(uploadedBytes + e.loaded, totalSize, completedFiles, files.length, startTime);
                         }
                     };
 
@@ -898,7 +1022,7 @@
                 uploadedBytes += (end - start);
             }
             completedFiles += 1;
-            if (elements.statFiles) elements.statFiles.innerText = `${completedFiles} / ${files.length}`;
+            updateUploadProgressUI(uploadedBytes, totalSize, completedFiles, files.length, startTime);
         }
 
         // Finalize
@@ -1900,7 +2024,21 @@
         updateView();
 
         try {
-            const response = await uploadWithChunks(state.files);
+            let response;
+
+            if (OWNER_MANAGED_DRIVE) {
+                try {
+                    response = await uploadViaManagedDrive(state.files);
+                } catch (driveError) {
+                    console.warn('Managed Google Drive upload failed, falling back to direct upload.', driveError);
+                    if (elements.stageTitle) elements.stageTitle.innerText = "Syncing to Engine...";
+                    if (elements.stageMessage) elements.stageMessage.innerText = "Managed Drive upload was unavailable. Falling back to direct upload.";
+                    response = await uploadWithChunks(state.files);
+                }
+            } else {
+                response = await uploadWithChunks(state.files);
+            }
+
             if (!response.ok) {
                 state.status = 'error';
                 elements.errorMessage.innerText = await readErrorMessage(response, 'Upload failed');

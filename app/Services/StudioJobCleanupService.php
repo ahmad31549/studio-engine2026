@@ -174,6 +174,10 @@ class StudioJobCleanupService
 
     private function deleteManagedDriveFolder(string $jobId, array $job): bool
     {
+        if (!(bool) config('studio.delete_drive_folders_on_cleanup', false)) {
+            return false;
+        }
+
         if (!$this->hasOwnerManagedGoogleDriveStorage()) {
             return false;
         }
