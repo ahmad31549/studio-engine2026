@@ -19,7 +19,7 @@ use ZipArchive;
 class StudioController extends Controller
 {
     private $storagePath;
-    private $limitMB = 2097152; // 2TB Working Limit
+    private $limitMB = 8192;
     private $ownerDriveAccessToken = null;
     private $ownerDriveAccessTokenExpiresAt = null;
     private StudioJobCleanupService $jobCleanup;
@@ -28,6 +28,7 @@ class StudioController extends Controller
     {
         $this->jobCleanup = $jobCleanup;
         $this->storagePath = storage_path('app/tasks');
+        $this->limitMB = max(1024, (int) config('studio.local_working_limit_mb', 8192));
         if (!file_exists($this->storagePath)) {
             mkdir($this->storagePath, 0755, true);
         }
@@ -37,13 +38,29 @@ class StudioController extends Controller
     {
         $totalSize = 0;
         if (!file_exists($this->storagePath)) return 0;
-        
-        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($this->storagePath));
-        foreach ($files as $file) {
-            if ($file->isFile()) {
-                $totalSize += $file->getSize();
+
+        foreach (glob($this->storagePath . DIRECTORY_SEPARATOR . '*') ?: [] as $path) {
+            if (!is_dir($path)) {
+                if (is_file($path)) {
+                    $totalSize += @filesize($path) ?: 0;
+                }
+                continue;
+            }
+
+            try {
+                $files = new \RecursiveIteratorIterator(
+                    new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS)
+                );
+                foreach ($files as $file) {
+                    if ($file->isFile()) {
+                        $totalSize += $file->getSize();
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Skipping path during storage usage scan: ' . $path . ' (' . $e->getMessage() . ')');
             }
         }
+
         return $totalSize;
     }
 
@@ -305,7 +322,9 @@ class StudioController extends Controller
 
         $jobId = (string) Str::uuid();
         $jobDir = $this->storagePath . '/' . $jobId . '/input';
-        if (!file_exists($jobDir)) mkdir($jobDir, 0755, true);
+        if (!is_dir($jobDir) && !@mkdir($jobDir, 0755, true) && !is_dir($jobDir)) {
+            return response()->json(['error' => 'Upload workspace could not be created.'], 500);
+        }
 
         $files = $request->file('files');
         if (!$files) return response()->json(['error' => 'No files provided'], 400);
@@ -384,7 +403,9 @@ class StudioController extends Controller
         }
 
         $jobDir = $this->storagePath . '/' . $jobId . '/input';
-        if (!file_exists($jobDir)) mkdir($jobDir, 0755, true);
+        if (!is_dir($jobDir) && !@mkdir($jobDir, 0755, true) && !is_dir($jobDir)) {
+            return response()->json(['error' => 'Upload workspace could not be created.'], 500);
+        }
 
         if ($fileKey !== '') {
             try {
@@ -707,7 +728,9 @@ class StudioController extends Controller
 
         $jobId = (string) Str::uuid();
         $jobDir = $this->storagePath . '/' . $jobId . '/input';
-        if (!file_exists($jobDir)) mkdir($jobDir, 0755, true);
+        if (!is_dir($jobDir) && !@mkdir($jobDir, 0755, true) && !is_dir($jobDir)) {
+            return response()->json(['error' => 'Import workspace could not be created.'], 500);
+        }
 
         try {
             $filename = "cloud_import.zip";
@@ -807,8 +830,8 @@ class StudioController extends Controller
     private function importDriveFilesToJob(string $jobId, array $driveFiles, string $token): object
     {
         $jobDir = $this->storagePath . '/' . $jobId . '/input';
-        if (!file_exists($jobDir)) {
-            mkdir($jobDir, 0755, true);
+        if (!is_dir($jobDir) && !@mkdir($jobDir, 0755, true) && !is_dir($jobDir)) {
+            throw new \RuntimeException('Import workspace could not be created.');
         }
 
         $existingJob = $this->getJob($jobId);
@@ -3527,7 +3550,7 @@ PY;
     {
         $cacheKey = 'studio_jobs_cleanup:last_run';
 
-        if (!Cache::add($cacheKey, time(), now()->addMinutes(15))) {
+        if (!Cache::add($cacheKey, time(), now()->addMinutes(5))) {
             return;
         }
 
