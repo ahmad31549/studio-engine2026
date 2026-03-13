@@ -839,6 +839,25 @@
         };
     }
 
+    function normalizeArchiveDownloadName(value, fallback = '') {
+        const resolvedName = String(value ?? '').trim() || String(fallback ?? '').trim();
+
+        if (!resolvedName) {
+            return '';
+        }
+
+        return /\.zip$/i.test(resolvedName) ? resolvedName : `${resolvedName}.zip`;
+    }
+
+    function buildJobDownloadHref(jobId, filename = '') {
+        const normalizedFilename = normalizeArchiveDownloadName(filename);
+        const baseHref = `${getResolvedApiBase()}/jobs/${jobId}/download`;
+
+        return normalizedFilename
+            ? `${baseHref}?filename=${encodeURIComponent(normalizedFilename)}`
+            : baseHref;
+    }
+
     function buildUploadFormData(files) {
         const formData = new FormData();
         files.forEach(file => formData.append('files[]', file, file.name));
@@ -2160,18 +2179,21 @@
 
     function renderOutputs() {
         const outCont = document.getElementById('outputContainer');
-        const resolvedApiBase = getResolvedApiBase();
-        const archiveName = state.bundle?.name || (state.finalZipName || state.storeName ? `${state.finalZipName || state.storeName}.zip` : '');
+        const archiveName = normalizeArchiveDownloadName(
+            state.finalZipName || state.bundle?.name || state.storeName,
+            state.bundle?.name || state.storeName || 'rebranded_pack.zip'
+        );
+        const bundleDownloadHref = buildJobDownloadHref(state.jobId, archiveName);
         const driveStatusText = getDriveStorageStatusText();
         const primaryDownloads = state.bundle ? [{
-            name: state.bundle.name,
+            name: archiveName,
             size: state.bundle.size || 0,
-            href: `${resolvedApiBase}/jobs/${state.jobId}/download`,
+            href: bundleDownloadHref,
             meta: `${formatFileSize(state.bundle.size || 0)} • ZIP archive • Click to download`
         }] : state.outputs.map((f, i) => ({
             name: f.name,
             size: f.size,
-            href: `${resolvedApiBase}/jobs/${state.jobId}/outputs/${i}/download`,
+            href: `${getResolvedApiBase()}/jobs/${state.jobId}/outputs/${i}/download`,
             meta: `${formatFileSize(f.size)} • Click to download`
         }));
 
@@ -2190,7 +2212,7 @@
                 <span style="font-size: 1.4rem;"><i class="fa-solid fa-box"></i></span>
                 <div style="flex: 1;">
                     <p style="font-size: 0.6rem; font-weight: 800; color: var(--primary); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px;">Output Archive Name</p>
-                    <input id="finalDownloadNameIn" type="text" value="${archiveName}" class="text-input" style="background: rgba(0,0,0,0.3); height: 42px; font-weight: 800; width: 100%; border: 1px solid rgba(255,255,255,0.1); margin-top: 8px;">
+                    <input id="finalDownloadNameIn" type="text" value="${escapeHtml(archiveName)}" class="text-input" style="background: rgba(0,0,0,0.3); height: 42px; font-weight: 800; width: 100%; border: 1px solid rgba(255,255,255,0.1); margin-top: 8px;">
                 </div>
             </div>` : '';
 
@@ -2207,15 +2229,40 @@
                 `; }).join('')}
             </div>
         `;
-        document.getElementById('downloadAllBtn').href = `${resolvedApiBase}/jobs/${state.jobId}/download`;
+        document.getElementById('downloadAllBtn').href = bundleDownloadHref;
         
         setTimeout(() => {
             const finalNameIn = document.getElementById('finalDownloadNameIn');
+            const downloadAllBtn = document.getElementById('downloadAllBtn');
+            const bundleDownloadLink = state.bundle ? outCont.querySelector('.file-item') : null;
+            const bundleNameLabel = state.bundle ? outCont.querySelector('.file-name') : null;
+
+            const syncArchiveDownloadTargets = (value, shouldNormalizeInput = false) => {
+                const normalizedArchiveName = normalizeArchiveDownloadName(value, archiveName);
+                const archiveDownloadHref = buildJobDownloadHref(state.jobId, normalizedArchiveName);
+
+                state.finalZipName = normalizedArchiveName;
+
+                if (downloadAllBtn) {
+                    downloadAllBtn.href = archiveDownloadHref;
+                }
+
+                if (bundleDownloadLink) {
+                    bundleDownloadLink.href = archiveDownloadHref;
+                }
+
+                if (bundleNameLabel) {
+                    bundleNameLabel.textContent = normalizedArchiveName;
+                }
+
+                if (shouldNormalizeInput && finalNameIn) {
+                    finalNameIn.value = normalizedArchiveName;
+                }
+            };
+
             if (finalNameIn) {
-                finalNameIn.oninput = () => {
-                    let newName = finalNameIn.value.trim() || archiveName;
-                    document.getElementById('downloadAllBtn').href = `${resolvedApiBase}/jobs/${state.jobId}/download?filename=${encodeURIComponent(newName)}`;
-                };
+                finalNameIn.oninput = () => syncArchiveDownloadTargets(finalNameIn.value.trim());
+                finalNameIn.onblur = () => syncArchiveDownloadTargets(finalNameIn.value.trim(), true);
             }
         }, 50);
     }
