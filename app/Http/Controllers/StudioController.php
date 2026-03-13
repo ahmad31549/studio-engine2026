@@ -1813,37 +1813,22 @@ class StudioController extends Controller
             ? $this->buildOutputBundle($jobId, $rebrandedFiles, $finalZipName . '.zip')
             : null;
 
+        $completedProgressMeta = [
+            'phase' => 'rebrand',
+            'total_files' => $safeTotal,
+            'completed_files' => $safeTotal,
+            'current_file_index' => $safeTotal,
+            'current_file_name' => $rebrandedFiles[count($rebrandedFiles) - 1]['name'] ?? ($job->files[$total - 1]['name'] ?? 'Package'),
+            'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
+            'action' => 'Complete',
+        ];
+
         if ($driveToken !== '' && count($rebrandedFiles) > 0) {
-            $this->updateJob($jobId, [
-                'progress' => 97,
-                'progress_message' => 'Syncing outputs to Google Drive...',
-                'progress_meta' => [
-                    'phase' => 'rebrand',
-                    'total_files' => $safeTotal,
-                    'completed_files' => $safeTotal,
-                    'current_file_index' => $safeTotal,
-                    'current_file_name' => $rebrandedFiles[count($rebrandedFiles) - 1]['name'] ?? ($job->files[$total - 1]['name'] ?? 'Package'),
-                    'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
-                    'action' => 'Syncing to Google Drive',
-                ],
+            $driveStorage = array_merge($driveStorage, [
+                'status' => 'syncing',
+                'error' => null,
+                'notice' => 'Files are ready to download. Google Drive sync is continuing in the background.',
             ]);
-
-            try {
-                $driveSync = $this->syncManagedFilesToGoogleDrive($jobId, $rebrandedFiles, $driveToken, $driveStorage);
-                $rebrandedFiles = $driveSync['files'];
-                $driveStorage = $driveSync['drive_storage'];
-                $driveStorage['outputs_synced'] = count($rebrandedFiles);
-
-                if (is_array($bundle)) {
-                    $bundleSync = $this->syncManagedFilesToGoogleDrive($jobId, [$bundle], $driveToken, $driveStorage);
-                    $bundle = $bundleSync['files'][0] ?? $bundle;
-                    $driveStorage = $bundleSync['drive_storage'];
-                    $driveStorage['bundle_synced'] = isset($bundle['drive_file_id']);
-                }
-            } catch (\Throwable $e) {
-                Log::warning("Output Drive sync failed for job {$jobId}: " . $e->getMessage());
-                $driveStorage = $this->buildDriveStorageErrorState($driveStorage, $e->getMessage());
-            }
         } elseif ($driveStorage !== []) {
             $driveStorage['status'] = $driveStorage['status'] ?? 'synced';
         }
@@ -1860,33 +1845,41 @@ class StudioController extends Controller
             'bundle' => $bundle,
             'progress' => 100,
             'progress_message' => 'Rebrand complete. Files are ready to download.',
-            'progress_meta' => [
-                'phase' => 'rebrand',
-                'total_files' => $safeTotal,
-                'completed_files' => $safeTotal,
-                'current_file_index' => $safeTotal,
-                'current_file_name' => $rebrandedFiles[count($rebrandedFiles) - 1]['name'] ?? ($job->files[$total - 1]['name'] ?? 'Package'),
-                'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
-                'action' => 'Complete',
-            ],
+            'progress_meta' => $completedProgressMeta,
             'store_name' => $storeName,
             'final_zip_name' => $finalZipName,
             'drive_storage' => $driveStorage,
         ]);
 
-        return response()->json([
+        if ($driveToken !== '' && count($rebrandedFiles) > 0) {
+            try {
+                $driveSync = $this->syncManagedFilesToGoogleDrive($jobId, $rebrandedFiles, $driveToken, $driveStorage);
+                $rebrandedFiles = $driveSync['files'];
+                $driveStorage = $driveSync['drive_storage'];
+                $driveStorage['outputs_synced'] = count($rebrandedFiles);
+
+                if (is_array($bundle)) {
+                    $bundleSync = $this->syncManagedFilesToGoogleDrive($jobId, [$bundle], $driveToken, $driveStorage);
+                    $bundle = $bundleSync['files'][0] ?? $bundle;
+                    $driveStorage = $bundleSync['drive_storage'];
+                    $driveStorage['bundle_synced'] = isset($bundle['drive_file_id']);
+                }
+            } catch (\Throwable $e) {
+                Log::warning("Output Drive sync failed for job {$jobId}: " . $e->getMessage());
+                $driveStorage = $this->buildDriveStorageErrorState($driveStorage, $e->getMessage());
+            }
+            $this->updateJob($jobId, [
+                'outputs' => $rebrandedFiles,
+                'bundle' => $bundle,
+                'drive_storage' => $driveStorage,
+            ]);
+        }
+
+        return $this->jsonResponseSafe([
             'status' => 'completed',
             'outputs' => $rebrandedFiles,
             'bundle' => $bundle,
-            'progress_meta' => [
-                'phase' => 'rebrand',
-                'total_files' => $safeTotal,
-                'completed_files' => $safeTotal,
-                'current_file_index' => $safeTotal,
-                'current_file_name' => $rebrandedFiles[count($rebrandedFiles) - 1]['name'] ?? ($job->files[$total - 1]['name'] ?? 'Package'),
-                'elapsed_seconds' => (int) floor(microtime(true) - $rebrandStartedAt),
-                'action' => 'Complete',
-            ],
+            'progress_meta' => $completedProgressMeta,
             'store_name' => $storeName,
             'final_zip_name' => $finalZipName,
             'drive_storage' => $driveStorage,
