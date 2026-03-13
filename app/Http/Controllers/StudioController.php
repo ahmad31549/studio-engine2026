@@ -332,10 +332,14 @@ class StudioController extends Controller
         $driveToken = $this->resolveGoogleDriveAccessToken($request->input('drive_token'));
         if ($driveToken !== '') {
             try {
-                $driveSync = $this->syncManagedFilesToGoogleDrive($jobId, $savedFiles, $driveToken);
-                $savedFiles = $driveSync['files'];
-                $driveStorage = $driveSync['drive_storage'];
-                $driveStorage['inputs_synced'] = count($savedFiles);
+                if ($this->shouldDeferInputDriveSync($savedFiles)) {
+                    $driveStorage = $this->buildDeferredInputDriveStorage($jobId, $driveToken, $savedFiles);
+                } else {
+                    $driveSync = $this->syncManagedFilesToGoogleDrive($jobId, $savedFiles, $driveToken);
+                    $savedFiles = $driveSync['files'];
+                    $driveStorage = $driveSync['drive_storage'];
+                    $driveStorage['inputs_synced'] = count($savedFiles);
+                }
             } catch (\Throwable $e) {
                 Log::warning("Initial Drive sync failed for job {$jobId}: " . $e->getMessage());
                 $driveStorage = $this->buildDriveStorageErrorState([], $e->getMessage());
@@ -471,10 +475,14 @@ class StudioController extends Controller
         $driveToken = $this->resolveGoogleDriveAccessToken($request->input('drive_token'));
         if ($driveToken !== '') {
             try {
-                $driveSync = $this->syncManagedFilesToGoogleDrive($jobId, $savedFiles, $driveToken);
-                $savedFiles = $driveSync['files'];
-                $driveStorage = $driveSync['drive_storage'];
-                $driveStorage['inputs_synced'] = count($savedFiles);
+                if ($this->shouldDeferInputDriveSync($savedFiles)) {
+                    $driveStorage = $this->buildDeferredInputDriveStorage($jobId, $driveToken, $savedFiles);
+                } else {
+                    $driveSync = $this->syncManagedFilesToGoogleDrive($jobId, $savedFiles, $driveToken);
+                    $savedFiles = $driveSync['files'];
+                    $driveStorage = $driveSync['drive_storage'];
+                    $driveStorage['inputs_synced'] = count($savedFiles);
+                }
             } catch (\Throwable $e) {
                 Log::warning("Finalize upload Drive sync failed for job {$jobId}: " . $e->getMessage());
                 $driveStorage = $this->buildDriveStorageErrorState([], $e->getMessage());
@@ -1960,6 +1968,46 @@ class StudioController extends Controller
             'job_folder_id' => $folder['job_folder_id'],
             'job_folder_url' => $folder['job_folder_url'],
         ]);
+    }
+
+    private function shouldDeferInputDriveSync(array $files): bool
+    {
+        $totalBytes = 0;
+
+        foreach ($files as $file) {
+            if (!is_array($file)) {
+                continue;
+            }
+
+            $totalBytes += max(0, (int) ($file['size'] ?? 0));
+        }
+
+        return $totalBytes >= 536870912; // 512MB+
+    }
+
+    private function buildDeferredInputDriveStorage(string $jobId, string $token, array $files, array $existing = []): array
+    {
+        $folder = $this->ensureGoogleDriveJobFolder($token, $jobId, $existing);
+        $totalBytes = 0;
+
+        foreach ($files as $file) {
+            if (!is_array($file)) {
+                continue;
+            }
+
+            $totalBytes += max(0, (int) ($file['size'] ?? 0));
+        }
+
+        return $this->buildDriveStorageState(array_merge($existing, [
+            'enabled' => true,
+            'provider' => 'google_drive',
+            'status' => 'pending',
+            'error' => null,
+            'inputs_synced' => (int) ($existing['inputs_synced'] ?? 0),
+            'deferred_inputs' => count($files),
+            'deferred_input_bytes' => $totalBytes,
+            'notice' => 'Large input upload stayed local during processing to avoid Google Drive timeout. Outputs still sync to Google Drive.',
+        ]), $folder);
     }
 
     private function buildDriveStorageErrorState(array $existing, string $message): array

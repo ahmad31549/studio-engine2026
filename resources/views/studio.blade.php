@@ -1246,7 +1246,7 @@
             })
         });
 
-        if (!finalizeResp.ok) throw new Error('Finalize failed');
+        if (!finalizeResp.ok) throw new Error(await readErrorMessage(finalizeResp, 'Finalize failed'));
         return finalizeResp;
     }
     
@@ -1551,6 +1551,9 @@
 
     function getDriveStorageStatusText() {
         if (!state.driveStorage) return '';
+        if (state.driveStorage.status === 'pending') {
+            return state.driveStorage.notice || 'Large inputs stay local during processing. Outputs still sync to Google Drive.';
+        }
         if (state.driveStorage.status === 'error') return state.driveStorage.error || 'Drive sync failed';
         if (state.driveStorage.status === 'out_of_sync') return state.driveStorage.error || 'Drive copy needs resync';
         if (state.driveStorage.job_folder_url) return 'Google Drive storage is connected for this job';
