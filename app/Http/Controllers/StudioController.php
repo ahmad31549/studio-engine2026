@@ -1322,10 +1322,94 @@ class StudioController extends Controller
     public function rebrand(Request $request, $jobId)
     {
         @set_time_limit(600); // Increase timeout for repackaging
+        @ignore_user_abort(true);
         $job = $this->getJob($jobId);
         if (!$job) {
             return response()->json(['error' => 'Job not found'], 404);
         }
+
+        if (!$request->boolean('_background')) {
+            $files = is_array($job->files ?? null) ? $job->files : [];
+            $initialMeta = [
+                'phase' => 'rebrand',
+                'total_files' => max(count($files), 1),
+                'completed_files' => 0,
+                'current_file_index' => 1,
+                'current_file_name' => $files[0]['name'] ?? 'Package',
+                'elapsed_seconds' => 0,
+                'action' => 'Preparing assets',
+            ];
+
+            $this->updateJob($jobId, [
+                'status' => 'processing',
+                'progress' => 2,
+                'progress_message' => 'Preparing rebranding engine...',
+                'progress_meta' => $initialMeta,
+                'error' => null,
+            ]);
+
+            $backgroundRequest = $request->duplicate(
+                $request->query->all(),
+                $request->request->all(),
+                $request->attributes->all(),
+                $request->cookies->all(),
+                $request->files->all(),
+                $request->server->all()
+            );
+            $backgroundRequest->request->set('_background', '1');
+
+            $userId = Auth::id();
+            app()->terminating(function () use ($backgroundRequest, $jobId, $userId, $files): void {
+                try {
+                    if ($userId) {
+                        Auth::onceUsingId($userId);
+                    }
+
+                    $this->rebrand($backgroundRequest, $jobId);
+                } catch (\Throwable $e) {
+                    Log::error("Rebrand failed for job {$jobId}: " . $e->getMessage(), [
+                        'exception' => $e,
+                    ]);
+
+                    $this->updateJob($jobId, [
+                        'status' => 'failed',
+                        'error' => $e->getMessage(),
+                        'progress_message' => 'Repackaging failed.',
+                        'progress_meta' => [
+                            'phase' => 'rebrand',
+                            'total_files' => max(count($files), 1),
+                            'completed_files' => 0,
+                            'current_file_index' => 1,
+                            'current_file_name' => $files[0]['name'] ?? 'Package',
+                            'elapsed_seconds' => 0,
+                            'action' => 'Failed',
+                        ],
+                    ]);
+                }
+            });
+
+            try {
+                if (app()->bound('session')) {
+                    app('session')->save();
+                }
+            } catch (\Throwable) {
+                // Ignore session flush failures and continue with async processing.
+            }
+
+            if (function_exists('session_write_close')) {
+                @session_write_close();
+            }
+
+            return response()->json([
+                'status' => 'processing',
+                'job_id' => $jobId,
+                'progress' => 2,
+                'progress_message' => 'Preparing rebranding engine...',
+                'progress_meta' => $initialMeta,
+                'drive_storage' => $job->drive_storage ?? [],
+            ], 202);
+        }
+
         $rebrandStartedAt = microtime(true);
 
         $this->updateJob($jobId, [

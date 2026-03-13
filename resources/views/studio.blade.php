@@ -2426,15 +2426,27 @@
             pollStatus();
             const resp = await apiFetch(`/jobs/${state.jobId}/rebrand`, { method: 'POST', body: formData });
             if (!resp.ok) {
+                if ([502, 503, 504].includes(resp.status)) {
+                    elements.stageMessage.innerText = "Connection dropped, but repackaging may still be running. Checking backend status...";
+                    return;
+                }
+
                 clearInterval(pollInterval);
                 throw new Error(await readErrorMessage(resp, "Repackaging process failed"));
             }
 
             const data = await resp.json();
-            clearInterval(pollInterval);
-            stopStageActivity();
             state.lastBackendProgressAt = Date.now();
             state.progressMeta = data.progress_meta || null;
+            state.driveStorage = data.drive_storage || state.driveStorage;
+
+            if (data.status === 'processing') {
+                if (data.progress_message) elements.stageMessage.innerText = data.progress_message;
+                return;
+            }
+
+            clearInterval(pollInterval);
+            stopStageActivity();
 
             if (data.status === 'completed') {
                 setProgressDisplay(100);
