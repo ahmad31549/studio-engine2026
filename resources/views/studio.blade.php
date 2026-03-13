@@ -837,7 +837,9 @@
         return formData;
     }
 
-    const CHUNK_SIZE = 16 * 1024 * 1024; // 16MB chunks reduce request overhead on shared hosting
+    const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB chunks balance request overhead with smoother parallel uploads
+    const MAX_PARALLEL_UPLOADS = 4;
+    const CHUNK_UPLOAD_RETRY_LIMIT = 2;
 
     function updateUploadProgressUI(currentUploaded, totalSize, completedFiles, totalFiles, startTime) {
         const safeTotal = Math.max(totalSize || 0, 1);
@@ -863,6 +865,59 @@
                 elements.statEta.innerText = "Finishing...";
             }
         }
+    }
+
+    function createChunkUploadFileKey(file, fileIndex) {
+        const safeName = String(file?.name || 'file')
+            .replace(/[^A-Za-z0-9._-]/g, '_')
+            .slice(-80);
+        return `${fileIndex}-${file?.lastModified || 0}-${file?.size || 0}-${safeName}`;
+    }
+
+    function getActiveTransferBytes(activeTransfers) {
+        let total = 0;
+        activeTransfers.forEach((value) => {
+            total += Number(value) || 0;
+        });
+        return total;
+    }
+
+    function parseXhrJson(xhr) {
+        if (xhr.responseType === 'json' && xhr.response && typeof xhr.response === 'object') {
+            return xhr.response;
+        }
+
+        if (!xhr.responseText) {
+            return {};
+        }
+
+        try {
+            return JSON.parse(xhr.responseText);
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function buildXhrErrorMessage(xhr, fallback) {
+        const payload = parseXhrJson(xhr);
+        if (typeof payload?.detail === 'string' && payload.detail.trim()) {
+            return payload.detail;
+        }
+        if (typeof payload?.error === 'string' && payload.error.trim()) {
+            return payload.error;
+        }
+
+        const text = String(xhr.responseText || '').trim();
+        return text ? `${fallback} (${xhr.status}): ${text.slice(0, 180)}` : `${fallback} (${xhr.status || 'network'})`;
+    }
+
+    function shouldRetryChunkUpload(status) {
+        return status === 0
+            || status === 408
+            || status === 409
+            || status === 425
+            || status === 429
+            || (status >= 500 && status < 600);
     }
 
     async function uploadViaManagedDrive(files) {
@@ -977,53 +1032,150 @@
     async function uploadWithChunks(files) {
         const jobId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Math.random().toString(36).substring(2);
         const totalSize = files.reduce((acc, f) => acc + f.size, 0);
-        let uploadedBytes = 0;
         const startTime = Date.now();
+        let committedBytes = 0;
         let completedFiles = 0;
+        const activeTransfers = new Map();
+        const fileChunkState = new Map();
+        const chunkTasks = [];
 
-        for (const file of files) {
-            const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
-            for (let i = 0; i < totalChunks; i++) {
-                const start = i * CHUNK_SIZE;
-                const end = Math.min(file.size, start + CHUNK_SIZE);
-                const chunk = file.slice(start, end);
-
-                const formData = new FormData();
-                formData.append('job_id', jobId);
-                formData.append('file_name', file.name);
-                formData.append('chunk_index', i);
-                formData.append('total_chunks', totalChunks);
-                formData.append('chunk', chunk, 'chunk.blob');
-
-                const response = await new Promise((resolve, reject) => {
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('POST', `${activeApiBase}/upload-chunk`);
-                    xhr.setRequestHeader('X-CSRF-TOKEN', document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
-                    
-                    xhr.upload.onprogress = (e) => {
-                        if (e.lengthComputable) {
-                            updateUploadProgressUI(uploadedBytes + e.loaded, totalSize, completedFiles, files.length, startTime);
-                        }
-                    };
-
-                    xhr.onload = () => resolve(new Response(xhr.responseText, { status: xhr.status }));
-                    xhr.onerror = () => reject(new Error('Network error during chunk upload'));
-                    xhr.send(formData);
-                });
-
-                if (!response.ok) {
-                    let msg = 'Failed to upload chunk';
-                    try {
-                        const err = await response.json();
-                        if (err.error) msg = err.error;
-                    } catch(e) {}
-                    throw new Error(`${msg} (${response.status})`);
-                }
-                uploadedBytes += (end - start);
-            }
-            completedFiles += 1;
-            updateUploadProgressUI(uploadedBytes, totalSize, completedFiles, files.length, startTime);
+        if (elements.stageTitle) elements.stageTitle.innerText = "Syncing to Engine...";
+        if (elements.stageMessage) {
+            elements.stageMessage.innerText = OWNER_MANAGED_DRIVE
+                ? "Using optimized parallel upload, then syncing your inputs to managed Google Drive."
+                : "Using optimized parallel upload to move your files into the engine.";
         }
+
+        const updateAggregateProgress = () => {
+            updateUploadProgressUI(
+                committedBytes + getActiveTransferBytes(activeTransfers),
+                totalSize,
+                completedFiles,
+                files.length,
+                startTime
+            );
+        };
+
+        files.forEach((file, fileIndex) => {
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
+            const fileKey = createChunkUploadFileKey(file, fileIndex);
+            fileChunkState.set(fileKey, {
+                totalChunks,
+                uploadedChunks: 0,
+            });
+
+            for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                const start = chunkIndex * CHUNK_SIZE;
+                const end = Math.min(file.size, start + CHUNK_SIZE);
+
+                chunkTasks.push({
+                    file,
+                    fileKey,
+                    chunkIndex,
+                    totalChunks,
+                    start,
+                    end,
+                    size: Math.max(0, end - start),
+                });
+            }
+        });
+
+        async function uploadChunkTask(task) {
+            const transferKey = `${task.fileKey}:${task.chunkIndex}`;
+
+            for (let attempt = 0; attempt <= CHUNK_UPLOAD_RETRY_LIMIT; attempt++) {
+                try {
+                    await new Promise((resolve, reject) => {
+                        const chunk = task.file.slice(task.start, task.end);
+                        const formData = new FormData();
+                        formData.append('job_id', jobId);
+                        formData.append('file_name', task.file.name);
+                        formData.append('file_key', task.fileKey);
+                        formData.append('file_size', task.file.size);
+                        formData.append('chunk_index', task.chunkIndex);
+                        formData.append('total_chunks', task.totalChunks);
+                        formData.append('chunk', chunk, 'chunk.blob');
+
+                        const xhr = new XMLHttpRequest();
+                        xhr.open('POST', `${getResolvedApiBase()}/upload-chunk`);
+                        xhr.responseType = 'json';
+                        xhr.setRequestHeader('X-CSRF-TOKEN', document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
+
+                        activeTransfers.set(transferKey, 0);
+                        updateAggregateProgress();
+
+                        xhr.upload.onprogress = (event) => {
+                            if (!event.lengthComputable) {
+                                return;
+                            }
+
+                            activeTransfers.set(transferKey, event.loaded);
+                            updateAggregateProgress();
+                        };
+
+                        xhr.onload = () => {
+                            activeTransfers.delete(transferKey);
+                            updateAggregateProgress();
+
+                            if (xhr.status >= 200 && xhr.status < 300) {
+                                resolve(parseXhrJson(xhr));
+                                return;
+                            }
+
+                            const error = new Error(buildXhrErrorMessage(xhr, 'Failed to upload chunk'));
+                            error.status = xhr.status;
+                            reject(error);
+                        };
+
+                        xhr.onerror = () => {
+                            activeTransfers.delete(transferKey);
+                            updateAggregateProgress();
+
+                            const error = new Error('Network error during chunk upload');
+                            error.status = 0;
+                            reject(error);
+                        };
+
+                        xhr.send(formData);
+                    });
+
+                    committedBytes += task.size;
+                    const stateForFile = fileChunkState.get(task.fileKey);
+                    if (stateForFile) {
+                        stateForFile.uploadedChunks += 1;
+                        if (stateForFile.uploadedChunks === stateForFile.totalChunks) {
+                            completedFiles += 1;
+                        }
+                    }
+                    updateAggregateProgress();
+                    return;
+                } catch (error) {
+                    if (attempt >= CHUNK_UPLOAD_RETRY_LIMIT || !shouldRetryChunkUpload(error?.status || 0)) {
+                        throw error;
+                    }
+
+                    await new Promise((resolve) => setTimeout(resolve, Math.min(1500 * (attempt + 1), 4000)));
+                }
+            }
+        }
+
+        let nextTaskIndex = 0;
+        const workerCount = Math.min(MAX_PARALLEL_UPLOADS, Math.max(chunkTasks.length, 1));
+        const workers = Array.from({ length: workerCount }, async () => {
+            while (nextTaskIndex < chunkTasks.length) {
+                const taskIndex = nextTaskIndex;
+                nextTaskIndex += 1;
+
+                if (!chunkTasks[taskIndex]) {
+                    return;
+                }
+
+                await uploadChunkTask(chunkTasks[taskIndex]);
+            }
+        });
+
+        await Promise.all(workers);
+        updateUploadProgressUI(committedBytes, totalSize, completedFiles, files.length, startTime);
 
         // Finalize
         const finalizeResp = await apiFetch('/finalize-upload', {
@@ -2025,19 +2177,7 @@
 
         try {
             let response;
-
-            if (OWNER_MANAGED_DRIVE) {
-                try {
-                    response = await uploadViaManagedDrive(state.files);
-                } catch (driveError) {
-                    console.warn('Managed Google Drive upload failed, falling back to direct upload.', driveError);
-                    if (elements.stageTitle) elements.stageTitle.innerText = "Syncing to Engine...";
-                    if (elements.stageMessage) elements.stageMessage.innerText = "Managed Drive upload was unavailable. Falling back to direct upload.";
-                    response = await uploadWithChunks(state.files);
-                }
-            } else {
-                response = await uploadWithChunks(state.files);
-            }
+            response = await uploadWithChunks(state.files);
 
             if (!response.ok) {
                 state.status = 'error';

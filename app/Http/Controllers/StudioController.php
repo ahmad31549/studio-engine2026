@@ -369,8 +369,10 @@ class StudioController extends Controller
 
         $jobId = $request->input('job_id');
         $fileName = $request->input('file_name');
+        $fileKey = trim((string) $request->input('file_key', ''));
         $chunkIndex = (int) $request->input('chunk_index');
         $totalChunks = (int) $request->input('total_chunks');
+        $fileSize = max(0, (int) $request->input('file_size', 0));
         $file = $request->file('chunk');
 
         if (!$jobId || !$fileName || !$file) {
@@ -379,6 +381,22 @@ class StudioController extends Controller
 
         $jobDir = $this->storagePath . '/' . $jobId . '/input';
         if (!file_exists($jobDir)) mkdir($jobDir, 0755, true);
+
+        if ($fileKey !== '') {
+            try {
+                $receivedChunks = $this->storeChunkUpload($jobDir, $fileKey, $fileName, $file, $chunkIndex, $totalChunks, $fileSize);
+
+                return response()->json([
+                    'status' => 'chunk_saved',
+                    'completed' => false,
+                    'received_chunks' => $receivedChunks,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning("Parallel chunk upload failed for {$fileName}: " . $e->getMessage());
+
+                return response()->json(['error' => $e->getMessage()], 500);
+            }
+        }
 
         $tempPath = $jobDir . '/' . $fileName . '.part';
         
@@ -423,6 +441,17 @@ class StudioController extends Controller
 
         $jobDir = $this->storagePath . '/' . $jobId . '/input';
         if (!file_exists($jobDir)) return response()->json(['error' => 'Upload dir not found'], 404);
+
+        try {
+            $this->assembleChunkedUploads($jobDir);
+        } catch (\Throwable $e) {
+            Log::warning("Chunk assembly failed for job {$jobId}: " . $e->getMessage());
+
+            return response()->json([
+                'error' => 'Upload assembly failed.',
+                'detail' => $e->getMessage(),
+            ], 422);
+        }
 
         $files = File::files($jobDir);
         $savedFiles = [];
@@ -479,6 +508,145 @@ class StudioController extends Controller
             'job_id' => $jobId,
             'drive_storage' => $driveStorage,
         ]);
+    }
+
+    private function storeChunkUpload(
+        string $jobDir,
+        string $fileKey,
+        string $fileName,
+        UploadedFile $file,
+        int $chunkIndex,
+        int $totalChunks,
+        int $fileSize = 0
+    ): int {
+        if ($chunkIndex < 0 || $totalChunks < 1 || $chunkIndex >= $totalChunks) {
+            throw new \InvalidArgumentException('Chunk metadata is invalid.');
+        }
+
+        $sourcePath = $file->getPathname();
+        if (!is_string($sourcePath) || $sourcePath === '' || !is_file($sourcePath)) {
+            throw new \RuntimeException('Uploaded chunk could not be read.');
+        }
+
+        $chunkDir = $this->chunkUploadDirectory($jobDir, $fileKey);
+        if (!File::isDirectory($chunkDir)) {
+            File::makeDirectory($chunkDir, 0755, true);
+        }
+
+        $manifestPath = $chunkDir . DIRECTORY_SEPARATOR . 'manifest.json';
+        $existingManifest = File::exists($manifestPath)
+            ? json_decode((string) File::get($manifestPath), true)
+            : [];
+
+        if (is_array($existingManifest)) {
+            $existingName = trim((string) ($existingManifest['file_name'] ?? ''));
+            $existingTotal = (int) ($existingManifest['total_chunks'] ?? 0);
+            if (($existingName !== '' && $existingName !== $fileName) || ($existingTotal > 0 && $existingTotal !== $totalChunks)) {
+                throw new \RuntimeException('Chunk upload metadata changed mid-stream.');
+            }
+        }
+
+        $manifest = [
+            'file_name' => $fileName,
+            'total_chunks' => $totalChunks,
+            'file_size' => $fileSize,
+            'updated_at' => now()->toIso8601String(),
+        ];
+
+        if (file_put_contents($manifestPath, json_encode($manifest, JSON_PRETTY_PRINT), LOCK_EX) === false) {
+            throw new \RuntimeException('Failed to write chunk manifest.');
+        }
+
+        $chunkPath = $chunkDir . DIRECTORY_SEPARATOR . sprintf('%08d.part', $chunkIndex);
+        $input = fopen($sourcePath, 'rb');
+        $out = fopen($chunkPath, 'wb');
+
+        if ($input === false || $out === false) {
+            if (is_resource($input)) {
+                fclose($input);
+            }
+            if (is_resource($out)) {
+                fclose($out);
+            }
+
+            throw new \RuntimeException('Failed to open upload streams.');
+        }
+
+        try {
+            stream_copy_to_stream($input, $out);
+        } finally {
+            fclose($input);
+            fclose($out);
+        }
+
+        return count(glob($chunkDir . DIRECTORY_SEPARATOR . '*.part') ?: []);
+    }
+
+    private function assembleChunkedUploads(string $jobDir): void
+    {
+        $chunksRoot = $jobDir . DIRECTORY_SEPARATOR . '.chunks';
+        if (!File::isDirectory($chunksRoot)) {
+            return;
+        }
+
+        foreach (File::directories($chunksRoot) as $chunkDir) {
+            $manifestPath = $chunkDir . DIRECTORY_SEPARATOR . 'manifest.json';
+            if (!File::exists($manifestPath)) {
+                throw new \RuntimeException('Upload manifest is missing for a chunked file.');
+            }
+
+            $manifest = json_decode((string) File::get($manifestPath), true);
+            if (!is_array($manifest)) {
+                throw new \RuntimeException('Upload manifest is invalid.');
+            }
+
+            $fileName = trim((string) ($manifest['file_name'] ?? ''));
+            $totalChunks = (int) ($manifest['total_chunks'] ?? 0);
+            if ($fileName === '' || $totalChunks < 1) {
+                throw new \RuntimeException('Upload manifest is incomplete.');
+            }
+
+            $finalPath = $this->makeUniqueLocalPath($jobDir, $fileName);
+            $out = fopen($finalPath, 'wb');
+            if ($out === false) {
+                throw new \RuntimeException("Failed to create assembled file for {$fileName}.");
+            }
+
+            try {
+                for ($chunkIndex = 0; $chunkIndex < $totalChunks; $chunkIndex++) {
+                    $chunkPath = $chunkDir . DIRECTORY_SEPARATOR . sprintf('%08d.part', $chunkIndex);
+                    if (!is_file($chunkPath)) {
+                        throw new \RuntimeException("Chunk " . ($chunkIndex + 1) . " of {$totalChunks} is missing for {$fileName}.");
+                    }
+
+                    $input = fopen($chunkPath, 'rb');
+                    if ($input === false) {
+                        throw new \RuntimeException("Failed to open chunk " . ($chunkIndex + 1) . " for {$fileName}.");
+                    }
+
+                    try {
+                        stream_copy_to_stream($input, $out);
+                    } finally {
+                        fclose($input);
+                    }
+                }
+            } finally {
+                fclose($out);
+            }
+
+            File::deleteDirectory($chunkDir);
+        }
+
+        File::deleteDirectory($chunksRoot);
+    }
+
+    private function chunkUploadDirectory(string $jobDir, string $fileKey): string
+    {
+        return $jobDir
+            . DIRECTORY_SEPARATOR
+            . '.chunks'
+            . DIRECTORY_SEPARATOR
+            . preg_replace('/[^A-Za-z0-9._-]/', '_', $fileKey);
     }
 
     /**
